@@ -67,6 +67,12 @@ type AuditCall struct {
 	ItemCount  int            `json:"item_count"`
 	Truncated  bool           `json:"truncated"`
 	Summary    map[string]int `json:"summary,omitempty"`
+
+	// Error marks an attempt that failed rather than a call that returned.
+	// Both spend a turn, and a record that kept only the ones that worked
+	// could not explain why a question ran out of turns -- which is the case
+	// where somebody goes looking at the record.
+	Error string `json:"error,omitempty"`
 }
 
 // maxAuditAnswer bounds a recorded answer. An answer is a paragraph; anything

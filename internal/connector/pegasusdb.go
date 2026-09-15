@@ -147,7 +147,7 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 
 	rows, err := conn.QueryContext(ctx, step.Query)
 	if err != nil {
-		return Evidence{}, newConnectorError("query_failed", err.Error())
+		return Evidence{}, newConnectorError("query_failed", err.Error()+dialectHint(step.Query, err.Error()))
 	}
 	defer rows.Close()
 
@@ -265,4 +265,43 @@ func scanRows(rows *sql.Rows, columns []string, maxRows, maxBytes int) ([]Eviden
 		return nil, false, newConnectorError("query_failed", err.Error())
 	}
 	return items, false, nil
+}
+
+// dialectHint appends the correction for a mistake this database rejects and
+// the error message does not explain.
+//
+// Which SQL dialect is behind this connector is a fixed property of the
+// deployment, not something to be rediscovered per question. Left to
+// rediscovery it was got wrong repeatedly: asked for percentiles, the model
+// sent PERCENTILE_CONT(0.25) OVER (), MariaDB answered with a bare "error in
+// your SQL syntax ... near 'OVER ()'", and nothing in that text says the
+// ordered-set function needs WITHIN GROUP (ORDER BY ...). Three of five turns
+// on one question went to that, in two spellings, and the question failed.
+//
+// The worse outcome was the one that did not fail. Having run out of syntax to
+// try, the model substituted AVG over the lowest N% of rows and presented it
+// as percentiles. That is always biased low, and it was: a P90 wait reported
+// as 260.6 minutes against a true 3280.3, with no error anywhere. A hint that
+// costs one string comparison prevents both.
+//
+// Deliberately narrow. It fires only on a syntax error, only for the two
+// ordered-set functions, and only when the required clause is absent -- so it
+// cannot mislead a query that failed for some other reason.
+func dialectHint(query, failure string) string {
+	if !strings.Contains(failure, "1064") {
+		return ""
+	}
+	upper := strings.ToUpper(query)
+	if !strings.Contains(upper, "PERCENTILE_CONT") && !strings.Contains(upper, "PERCENTILE_DISC") {
+		return ""
+	}
+	if strings.Contains(upper, "WITHIN GROUP") {
+		return ""
+	}
+	return " -- this is MariaDB: PERCENTILE_CONT and PERCENTILE_DISC are " +
+		"ordered-set functions and require WITHIN GROUP (ORDER BY <expr>) " +
+		"before OVER (). For example: PERCENTILE_CONT(0.9) WITHIN GROUP " +
+		"(ORDER BY EndTime - StartTime) OVER () AS p90. Several percentiles " +
+		"may be selected in one statement; add LIMIT 1 since OVER () repeats " +
+		"the value on every row."
 }

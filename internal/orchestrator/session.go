@@ -352,6 +352,17 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 
 	forceTool := ""
 	budgetReached := false
+
+	// What each turn actually did. Without this the only thing the loop could
+	// say on the way out was its own constant: "gave up after 5 tool calls",
+	// whether it had spent five turns on five different theories or three of
+	// them re-submitting one query that had already failed twice. Those need
+	// different responses from whoever reads the message, so the message has
+	// to tell them apart.
+	succeeded, failed := 0, 0
+	seenFailure := map[string]string{}
+	seenError := map[string]bool{}
+	var lastError string
 	for turn := 0; turn < maxToolCalls; turn++ {
 		choice, err := s.client.Complete(ctx, messages, tools, forceTool)
 		forceTool = ""
@@ -427,9 +438,59 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 				s.event.Decision = "denied"
 				return "", failure.err
 			}
+			failed++
+			lastError = failure.err.Error()
+
+			// A failed attempt spends a turn, so it is the reason a question
+			// runs out of them. Recording only successes made the audit for a
+			// five-turn failure show two calls and no explanation, and the
+			// only way to find out what the other three were was to run the
+			// question again with -trace and hope it failed the same way.
+			attemptedQuery := queryFromArguments(call.Function.Arguments)
+			s.event.Calls = append(s.event.Calls, AuditCall{
+				Source: "orchestrator",
+				Action: "attempt_failed",
+				Query:  attemptedQuery,
+				Error:  lastError,
+			})
+
+			// Feeding back the same "correct this and call again" to a model
+			// that has already made this exact mistake invites the same fix.
+			// It happened: one question spent turns 1, 2 and 5 on
+			// PERCENTILE_CONT(x) OVER () -- rejected each time by MariaDB for
+			// want of WITHIN GROUP (ORDER BY ...) -- and turn 5 was turn 1
+			// again. Naming the repeat is cheap and is the difference between
+			// a turn spent re-deriving and a turn spent elsewhere.
+			//
+			// Two signals, because the query text alone missed the case that
+			// prompted this. Turns 1 and 4 of one failed question were the
+			// same construction differing only by a DISTINCT, so comparing
+			// query text saw two different queries while the database saw one
+			// mistake twice. The error is the better discriminator: an
+			// identical error means the construction is wrong, not the
+			// spelling, and re-sending a variant of it cannot help.
+			guidance := "Correct this and call the tool again."
+			if previous, repeat := seenFailure[normalizeQuery(attemptedQuery)]; repeat {
+				guidance = "You have already sent this exact query in this " +
+					"conversation and it failed the same way: " + previous +
+					". Do not send it again. Use a different construction."
+				s.record("repeated_failing_query",
+					"model re-sent a query that already failed", false)
+			} else if seenError[lastError] {
+				guidance = "This same error has already occurred in this " +
+					"conversation. The construction is wrong, not the " +
+					"formatting, so re-spelling it will fail again. Read the " +
+					"error text for what the statement is missing, and if it " +
+					"names no fix, ask the schema or use a different approach."
+				s.record("repeated_failing_error",
+					"a different query produced an error already seen", false)
+			}
+			seenFailure[normalizeQuery(attemptedQuery)] = lastError
+			seenError[lastError] = true
+
 			messages = append(messages, Message{
 				Role: "tool", ToolCallID: call.ID, Name: toolName,
-				Content: fmt.Sprintf(`{"error":%q,"guidance":"Correct this and call the tool again."}`, failure.err.Error()),
+				Content: fmt.Sprintf(`{"error":%q,"guidance":%q}`, lastError, guidance),
 			})
 			continue
 		}
@@ -467,6 +528,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			continue
 		}
 
+		succeeded++
 		s.record("evidence_collected", fmt.Sprintf("%d source(s)", len(result.Evidence)), true)
 		for _, evidence := range result.Evidence {
 			s.event.Calls = append(s.event.Calls, AuditCall{
@@ -485,9 +547,21 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		})
 	}
 
-	s.record("turn_limit_reached", fmt.Sprintf("%d tool calls without an answer", maxToolCalls), false)
+	// "gave up after 5 tool calls" named the limit rather than the run, which
+	// reads as "the limit is too low" no matter what actually went wrong. Say
+	// how the turns were spent instead, so the next question is the right one:
+	// raise the limit, fix the query, or look at the source.
+	detail := fmt.Sprintf("%d succeeded, %d failed", succeeded, failed)
+	if repeats := failed - len(seenError); repeats > 0 {
+		detail += fmt.Sprintf(", %d of them repeating an error already seen", repeats)
+	}
+	if lastError != "" {
+		detail += "; last error: " + lastError
+	}
+	s.record("turn_limit_reached", detail, false)
 	s.event.Status = "failed"
-	return "", fmt.Errorf("gave up after %d tool calls without an answer", maxToolCalls)
+	s.event.Error = detail
+	return "", fmt.Errorf("gave up after %d attempts (%s)", maxToolCalls, detail)
 }
 
 // callFailure distinguishes a refusal, which ends the loop, from a mistake the
@@ -631,4 +705,27 @@ func evidenceBudget() int {
 		}
 	}
 	return maxEvidenceJSON
+}
+
+// queryFromArguments pulls the SQL out of a tool call for the record. The
+// arguments are the model's, so they may not parse; an unparsable call is
+// still worth recording verbatim, because "the model sent something that was
+// not JSON" is itself the finding.
+func queryFromArguments(arguments string) string {
+	var parsed struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &parsed); err != nil || parsed.Query == "" {
+		return arguments
+	}
+	return parsed.Query
+}
+
+// normalizeQuery collapses whitespace and case so that the same query sent
+// twice is recognised as the same query. It is deliberately loose: the point
+// is to catch a model re-deriving an identical mistake through slightly
+// different formatting, not to decide SQL equivalence, which is not something
+// string comparison can do.
+func normalizeQuery(query string) string {
+	return strings.ToLower(strings.Join(strings.Fields(query), " "))
 }
