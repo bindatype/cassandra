@@ -6,6 +6,12 @@
         "system-log",
         "workspace-sample"
       ]
+    },
+    "sgtstubby.arc.gwu.edu": {
+      "resources": [
+        "log-dir",
+        "log-dir-metadata"
+      ]
     }
   },
   "resources": {
@@ -22,6 +28,17 @@
       "params": {
         "max_bytes": 4096
       }
+    },
+    "log-dir": {
+      "operation": "filesystem.list",
+      "path": "/var/log",
+      "params": {
+        "max_entries": 256
+      }
+    },
+    "log-dir-metadata": {
+      "operation": "filesystem.stat",
+      "path": "/var/log"
     }
   }
 }
