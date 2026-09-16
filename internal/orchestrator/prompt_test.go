@@ -461,3 +461,52 @@ func TestWithheldEvidenceIsDisclosed(t *testing.T) {
 		t.Error("repeated a limitation the model had already stated")
 	}
 }
+
+// TestSchemaNamesThePolicysLiveTargets pins the fix for three consecutive
+// refusals that were each correct and none of them useful: asked to list a
+// directory on a host it had been told about by name, the model proposed host
+// "sgtstubby" against a policy saying "sgtstubby.arc.gwu.edu", then resource
+// "/var/log" and "var_log" against a policy saying "log-dir".
+func TestSchemaNamesThePolicysLiveTargets(t *testing.T) {
+	hosts := []string{"sgtstubby.arc.gwu.edu"}
+	resources := []string{"log-dir", "log-dir-metadata"}
+
+	encoded, err := json.Marshal(toolDefinition([]string{"live.evidence"}, hosts, resources))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	schema := string(encoded)
+
+	// The resource field is closed: a resource alias means nothing to any
+	// other intent, so guessing one is never the right behaviour.
+	for _, want := range resources {
+		if !strings.Contains(schema, want) {
+			t.Errorf("schema does not offer resource %q; the model can only guess it", want)
+		}
+	}
+	if !strings.Contains(schema, `"enum":["log-dir","log-dir-metadata"]`) {
+		t.Error("resource is not an enum; a free-form string invites the path that was tried three times")
+	}
+
+	// The host field names the authorized hosts but is NOT closed. host is
+	// also a Wazuh agent name and an RT subject; an enum here would refuse
+	// agent.status for every host without an endpoint agent.
+	if !strings.Contains(schema, "sgtstubby.arc.gwu.edu") {
+		t.Error("schema does not name the authorized live host")
+	}
+	if strings.Contains(schema, `"enum":["sgtstubby.arc.gwu.edu"]`) {
+		t.Error("host was closed to the live hosts; agent.status for any other host would now be refused")
+	}
+}
+
+// TestSchemaStaysOpenWithoutAPolicy asserts the degenerate case does not
+// produce an empty enum, which is a schema permitting nothing.
+func TestSchemaStaysOpenWithoutAPolicy(t *testing.T) {
+	encoded, err := json.Marshal(toolDefinition([]string{"fleet.inventory"}, nil, nil))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), `"enum":[]`) {
+		t.Error("empty enum emitted; that permits no value at all")
+	}
+}

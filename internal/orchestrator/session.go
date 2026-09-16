@@ -119,7 +119,19 @@ const (
 // entire surface a model can influence: an intent, and optionally a host or
 // resource alias. Everything else about execution is resolved by policy.
 func ToolDefinition(intents []string) any {
-	return map[string]any{
+	return toolDefinition(intents, nil, nil)
+}
+
+// toolDefinition builds the schema, naming the live targets the policy
+// authorizes when there are any.
+//
+// The enum goes on resource and not on host. A resource alias means something
+// only to live.evidence, so a closed set is exactly right. A host is also a
+// Wazuh agent name and an RT subject, where any hostname the estate contains
+// is legitimate -- an enum there would refuse agent.status for every host that
+// happens not to run an endpoint agent.
+func toolDefinition(intents, liveHosts, liveResources []string) any {
+	definition := map[string]any{
 		"type": "function",
 		"function": map[string]any{
 			"name": toolName,
@@ -140,14 +152,8 @@ func ToolDefinition(intents []string) any {
 						"enum":        intents,
 						"description": "Which bounded question to ask.",
 					},
-					"host": map[string]any{
-						"type":        "string",
-						"description": "Host selector. Required for agent.status, live.evidence, and tickets.for_host.",
-					},
-					"resource": map[string]any{
-						"type":        "string",
-						"description": "Policy-defined resource alias. For live.evidence ONLY. Never put SQL here.",
-					},
+					"host":     hostSchema(liveHosts),
+					"resource": resourceSchema(liveResources),
 					"query": map[string]any{
 						"type":        "string",
 						"description": "The SQL for database.query, and the only field SQL may go in. One read-only SELECT, bounded by WHERE.",
@@ -209,6 +215,7 @@ func ToolDefinition(intents []string) any {
 			},
 		},
 	}
+	return definition
 }
 
 // Session runs one question through the model, the broker, and back.
@@ -349,7 +356,10 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: question},
 	}
-	tools := []any{ToolDefinition(s.intents)}
+	// Built per session rather than once, because it depends on the policy
+	// this session was constructed with.
+	liveHosts, liveResources := s.router.LiveTargets()
+	tools := []any{toolDefinition(s.intents, liveHosts, liveResources)}
 
 	forceTool := ""
 	budgetReached := false
@@ -729,4 +739,32 @@ func queryFromArguments(arguments string) string {
 // string comparison can do.
 func normalizeQuery(query string) string {
 	return strings.ToLower(strings.Join(strings.Fields(query), " "))
+}
+
+// hostSchema names the hosts the policy authorizes for live evidence without
+// closing the field, because host is not only a live-evidence selector.
+func hostSchema(liveHosts []string) map[string]any {
+	description := "Host selector. Required for agent.status, live.evidence, and tickets.for_host."
+	if len(liveHosts) > 0 {
+		description += " Hosts authorized for live.evidence, which must be given exactly as written: " +
+			strings.Join(liveHosts, ", ") + "."
+	}
+	return map[string]any{"type": "string", "description": description}
+}
+
+// resourceSchema closes the field to the aliases the policy defines. With none
+// defined the field stays open, because an empty enum is a schema that permits
+// nothing and would be a confusing way to say "no endpoint agent is
+// configured" -- the intent is withheld entirely in that case anyway.
+func resourceSchema(liveResources []string) map[string]any {
+	schema := map[string]any{
+		"type":        "string",
+		"description": "Policy-defined resource alias. For live.evidence ONLY. Never put SQL here. Not a path.",
+	}
+	if len(liveResources) > 0 {
+		schema["enum"] = liveResources
+		schema["description"] = "Policy-defined resource alias, not a filesystem path. " +
+			"For live.evidence ONLY. Never put SQL here."
+	}
+	return schema
 }

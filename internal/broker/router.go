@@ -3,6 +3,7 @@ package broker
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 )
@@ -410,4 +411,38 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 	default:
 		return nil
 	}
+}
+
+// LiveTargets reports the hosts authorized for live.evidence and the resource
+// names they may be asked for.
+//
+// The policy has always known both, and the model was never told either. Asked
+// to list a directory on a host it had just been told about by name, it
+// proposed host "sgtstubby" where the policy says "sgtstubby.arc.gwu.edu", and
+// resource "/var/log" and then "var_log" where the policy says "log-dir" --
+// three refusals in a row, each correct, none of them informative enough to be
+// the last. Guessing an alias out of a set the caller holds is not something a
+// model can be prompted into doing reliably, and it is not something it should
+// have to: if code can determine it, code must.
+//
+// Hosts and resources are returned separately rather than as a map because
+// they are used differently. A resource name is meaningful only for
+// live.evidence, so it can be offered as a closed set. A host is also a Wazuh
+// agent name and an RT subject, where any hostname is legitimate, so the live
+// list can only be advice.
+func (r *Router) LiveTargets() (hosts []string, resources []string) {
+	seen := make(map[string]struct{})
+	for host, allowed := range r.liveHosts {
+		hosts = append(hosts, host)
+		for name := range allowed {
+			if _, done := seen[name]; done {
+				continue
+			}
+			seen[name] = struct{}{}
+			resources = append(resources, name)
+		}
+	}
+	sort.Strings(hosts)
+	sort.Strings(resources)
+	return hosts, resources
 }
