@@ -106,7 +106,7 @@ def without(text, name):
 
 
 def score(model, prompt_path):
-    env = dict(os.environ, SROIAAA_PROMPT=prompt_path, RUNS=str(RUNS))
+    env = dict(os.environ, CASS_PROMPT=prompt_path, RUNS=str(RUNS))
     out = subprocess.run([sys.executable, SUITE, model], capture_output=True,
                          text=True, env=env, timeout=3600)
     got = re.search(r"^\s+%s\s+(\d+)/(\d+)\s+avg\s+([\d.]+)s" % re.escape(model),

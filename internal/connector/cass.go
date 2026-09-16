@@ -38,7 +38,7 @@ type CassConfig struct {
 	MaxResponseBytes int64
 }
 
-// ParseCassAgents reads the value of SROIAAA_AGENT_CONFIG. It intentionally
+// ParseCassAgents reads the value of CASS_AGENT_CONFIG. It intentionally
 // keeps endpoint and token together per host: a single shared token would make
 // one endpoint credential authority for every configured agent.
 func ParseCassAgents(value string) (map[string]CassAgentConfig, error) {

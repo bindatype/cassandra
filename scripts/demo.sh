@@ -8,8 +8,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-POLICY=${SROIAAA_POLICY:-"$ROOT/configs/broker-policy.example.json"}
-BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
+POLICY=${CASS_POLICY:-"$ROOT/configs/broker-policy.example.json"}
+BIN=${CASS_BIN:-"$ROOT/runtime"}
 
 mkdir -p "$BIN"
 go build -o "$BIN/cass-chat" "$ROOT/cmd/cass-chat"

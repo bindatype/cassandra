@@ -13,9 +13,9 @@ RUNTIME = os.path.join(ROOT, "runtime")
 # The one place a model name is resolved for the whole harness.
 #
 # Seven eval scripts each held their own default. Three read EVAL_MODEL, one
-# read SROIAAA_EVAL_MODEL, three read nothing, and all seven named gemma4:31b,
+# read CASS_EVAL_MODEL, three read nothing, and all seven named gemma4:31b,
 # which the gateway stopped serving. `ask` had meanwhile been made
-# configurable through SROIAAA_MODEL, so the deployment was answering on one
+# configurable through CASS_MODEL, so the deployment was answering on one
 # model while every measurement of it silently named another -- or, once the
 # old name was withdrawn, failed at the first call.
 #
@@ -25,9 +25,25 @@ RUNTIME = os.path.join(ROOT, "runtime")
 FALLBACK_MODEL = "gemma4-31b-vllm"
 
 
+def env_value(name):
+    """The value of a CASS_ variable, falling back to its SROIAAA_ spelling.
+
+    The harnesses check for variables by name before running, so a check that
+    knows only the new spelling refuses on a host whose environment is
+    perfectly good -- and refuses in the quiet way described under SOURCE_ENV,
+    by producing a report about nothing.
+    """
+    value = os.environ.get(name)
+    if value:
+        return value
+    if name.startswith("CASS_"):
+        return os.environ.get("SROIAAA_" + name[len("CASS_"):], "")
+    return ""
+
+
 def default_model():
-    for name in ("SROIAAA_EVAL_MODEL", "EVAL_MODEL", "SROIAAA_MODEL"):
-        value = os.environ.get(name)
+    for name in ("CASS_EVAL_MODEL", "EVAL_MODEL", "CASS_MODEL"):
+        value = env_value(name)
         if value:
             return value
     return FALLBACK_MODEL
@@ -46,18 +62,18 @@ _CTX.verify_mode = ssl.CERT_NONE
 # and the reason the fail-closed design works -- so a harness run without it
 # does not fail loudly. Every case refuses, the model looks incapable, and the
 # report is a page of numbers about nothing. eval_pegasus.py did exactly this:
-# it required Zabbix and Wazuh and never checked SROIAAA_PEGASUS_DSN, the one
+# it required Zabbix and Wazuh and never checked CASS_PEGASUS_DSN, the one
 # variable without which it cannot measure anything.
 SOURCE_ENV = {
-    "mindrouter": (["MINDROUTER_API_KEY", "SROIAAA_MINDROUTER_ENDPOINT"],
+    "mindrouter": (["MINDROUTER_API_KEY", "CASS_MINDROUTER_ENDPOINT"],
                    "no model can be reached, so nothing runs at all"),
-    "zabbix": (["SROIAAA_ZABBIX_ENDPOINT", "ZABBIX_RO_TOKEN"],
+    "zabbix": (["CASS_ZABBIX_ENDPOINT", "ZABBIX_RO_TOKEN"],
                "monitoring.problems and monitoring.history are withheld from the model"),
-    "wazuh": (["SROIAAA_WAZUH_ENDPOINT", "WAZUH_API_USERNAME", "WAZUH_API_PASSWORD"],
+    "wazuh": (["CASS_WAZUH_ENDPOINT", "WAZUH_API_USERNAME", "WAZUH_API_PASSWORD"],
               "fleet.inventory and agent.status are withheld from the model"),
-    "pegasus": (["SROIAAA_PEGASUS_DSN"],
+    "pegasus": (["CASS_PEGASUS_DSN"],
                 "database.query is withheld from the model"),
-    "rt": (["SROIAAA_RT_ENDPOINT", "RT_API_TOKEN", "SROIAAA_RT_QUEUES"],
+    "rt": (["CASS_RT_ENDPOINT", "RT_API_TOKEN", "CASS_RT_QUEUES"],
            "tickets.open and tickets.for_host are withheld from the model"),
 }
 
@@ -79,7 +95,7 @@ def require_env(*sources):
     problems = []
     for source in (sources or DEFAULT_SOURCES):
         names, consequence = SOURCE_ENV[source]
-        missing = [name for name in names if not os.environ.get(name)]
+        missing = [name for name in names if not env_value(name)]
         if missing:
             problems.append("  %-11s missing %s\n              -> %s"
                             % (source, ", ".join(missing), consequence))
@@ -106,14 +122,14 @@ def zabbix_count(host=None):
     body = json.dumps({"jsonrpc": "2.0", "method": "trigger.get", "id": 1,
                        "params": params}).encode()
     req = urllib.request.Request(
-        os.environ["SROIAAA_ZABBIX_ENDPOINT"], data=body, method="POST",
+        os.environ["CASS_ZABBIX_ENDPOINT"], data=body, method="POST",
         headers={"Content-Type": "application/json-rpc",
                  "Authorization": "Bearer " + os.environ["ZABBIX_RO_TOKEN"]})
     return int(json.load(urllib.request.urlopen(req, context=_CTX, timeout=30))["result"])
 
 
 def wazuh_agent_counts():
-    base = os.environ["SROIAAA_WAZUH_ENDPOINT"].rstrip("/")
+    base = os.environ["CASS_WAZUH_ENDPOINT"].rstrip("/")
     cred = base64.b64encode(("%s:%s" % (
         os.environ["WAZUH_API_USERNAME"], os.environ["WAZUH_API_PASSWORD"])).encode()).decode()
     req = urllib.request.Request(base + "/security/user/authenticate?raw=true",

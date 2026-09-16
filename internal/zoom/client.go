@@ -78,7 +78,7 @@ var Variants = []Variant{
 }
 
 // DefaultVariant is the construction Zoom accepted on 2026-08-30. Override it
-// with SROIAAA_ZOOM_SIGNATURE_VARIANT rather than editing here, and rerun
+// with CASS_ZOOM_SIGNATURE_VARIANT rather than editing here, and rerun
 // -probe before changing it: the other three are not near-misses, they are
 // rejected outright.
 var DefaultVariant = Variants[0]

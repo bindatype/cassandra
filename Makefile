@@ -1,6 +1,6 @@
 GO ?= go
 DIST ?= dist
-BINARY ?= cass-agent
+BINARY ?= cassd
 
 .PHONY: help install uninstall test verify check-entrypoints test-rt-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
 
@@ -100,18 +100,18 @@ eval-rt-shape:
 	python3 ./scripts/eval_rt_shape.py
 
 run:
-	$(GO) run ./cmd/cass-agent
+	$(GO) run ./cmd/cassd
 
 fmt:
 	$(GO) fmt ./...
 
 build-linux-amd64:
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o $(DIST)/$(BINARY)-linux-amd64 ./cmd/cass-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o $(DIST)/$(BINARY)-linux-amd64 ./cmd/cassd
 
 build-linux-arm64:
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o $(DIST)/$(BINARY)-linux-arm64 ./cmd/cass-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o $(DIST)/$(BINARY)-linux-arm64 ./cmd/cassd
 
 build-linux-all: build-linux-amd64 build-linux-arm64
 

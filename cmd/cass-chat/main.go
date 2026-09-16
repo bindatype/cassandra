@@ -61,7 +61,7 @@ const (
 	// is none to score it against.
 	//
 	// Restore the grading the first time a second model is served. Deployments
-	// can select a MindRouter alias with SROIAAA_MODEL, and callers can
+	// can select a MindRouter alias with CASS_MODEL, and callers can
 	// override either value per call with -model.
 	defaultModel = "gemma4-31b-vllm"
 )

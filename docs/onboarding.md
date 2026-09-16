@@ -63,39 +63,39 @@ umask 077
 cat > ~/.config/sroiaaa/env <<'ENVEOF'
 # The model gateway. Needed by everything that asks a question.
 export MINDROUTER_API_KEY=...
-export SROIAAA_MINDROUTER_ENDPOINT=http://localhost:8000
+export CASS_MINDROUTER_ENDPOINT=http://localhost:8000
 # Prefer a role alias so the gateway can change its backing model without a
 # client deployment. Use the served model name until the alias is provisioned.
-export SROIAAA_MODEL=default-agent
+export CASS_MODEL=default-agent
 
 # Zabbix: monitoring problems and the event log.
-export SROIAAA_ZABBIX_ENDPOINT=https://zabbix.example.edu/api_jsonrpc.php
+export CASS_ZABBIX_ENDPOINT=https://zabbix.example.edu/api_jsonrpc.php
 export ZABBIX_RO_TOKEN=...
 
 # Wazuh: agent inventory and connection state.
-export SROIAAA_WAZUH_ENDPOINT=https://wazuh.example.edu:55000
+export CASS_WAZUH_ENDPOINT=https://wazuh.example.edu:55000
 export WAZUH_API_USERNAME=...
 export WAZUH_API_PASSWORD=...
 # Agents in these groups are escalated when they go down. Without it the
 # check does not run, and the evidence says so rather than reporting zero.
-export SROIAAA_WAZUH_CRITICAL_GROUPS=RTS_Ops,Viper
+export CASS_WAZUH_CRITICAL_GROUPS=RTS_Ops,Viper
 
 # Scheduler accounting. Needed by eval-pegasus and the morning digest.
-export SROIAAA_PEGASUS_DSN='readonly:PASSWORD@tcp(db.example.edu:3306)/pegasusdb?timeout=10s&readTimeout=30s&parseTime=false'
+export CASS_PEGASUS_DSN='readonly:PASSWORD@tcp(db.example.edu:3306)/pegasusdb?timeout=10s&readTimeout=30s&parseTime=false'
 
 # Request Tracker tickets. Metadata only -- subject, queue, status, owner and
-# dates, never ticket bodies. SROIAAA_RT_QUEUES is a required allowlist: unset,
+# dates, never ticket bodies. CASS_RT_QUEUES is a required allowlist: unset,
 # the connector refuses to construct rather than searching every queue, so
 # tickets.open and tickets.for_host are withheld from the model entirely and it
 # will report RT as unavailable.
-export SROIAAA_RT_ENDPOINT=https://rt.example.edu
+export CASS_RT_ENDPOINT=https://rt.example.edu
 export RT_API_TOKEN=...
-export SROIAAA_RT_QUEUES=Ops,Helpdesk
+export CASS_RT_QUEUES=Ops,Helpdesk
 
 # Endpoint agents: policy host -> one HTTPS endpoint and its own bearer token.
 # Keep this in the sourced private env file, never in broker policy or a shell
 # flag. HTTP is accepted only for a loopback development agent.
-export SROIAAA_AGENT_CONFIG='{
+export CASS_AGENT_CONFIG='{
   "sgtstubby.arc.gwu.edu": {
     "endpoint": "https://sgtstubby.arc.gwu.edu:8443",
     "token": "..."
@@ -105,15 +105,15 @@ export SROIAAA_AGENT_CONFIG='{
 # NetBox: source of truth for what a device is, where it lives, and what
 # address it holds. No connector yet -- these are read by bin/netbox-probe.sh,
 # which is the reconnaissance step that comes before one.
-export SROIAAA_NETBOX_ENDPOINT=https://netbox.example.edu
+export CASS_NETBOX_ENDPOINT=https://netbox.example.edu
 export NETBOX_RO_TOKEN=...
 # This deployment serves only its leaf certificate, so the chain cannot be
 # built from the system trust store. Pin the issuing intermediate rather than
 # disabling verification; see the NetBox Interaction Guide for how to fetch it.
-export SROIAAA_NETBOX_CACERT=$HOME/.config/sroiaaa/netbox-ca.pem
+export CASS_NETBOX_CACERT=$HOME/.config/sroiaaa/netbox-ca.pem
 
 # Where each answered question is recorded. Yours, not shared.
-export SROIAAA_BROKER_AUDIT=$HOME/.local/share/sroiaaa/broker-audit.jsonl
+export CASS_BROKER_AUDIT=$HOME/.local/share/sroiaaa/broker-audit.jsonl
 ENVEOF
 chmod 600 ~/.config/sroiaaa/env
 mkdir -p ~/.local/share/sroiaaa
@@ -214,7 +214,7 @@ run.
 | `missing environment: ...` | The env file is not sourced in *this* shell, or a line lacks `export`. Sourcing does not survive a new terminal. |
 | Zabbix or Wazuh "connector error" | Usually a missing credential rather than a broken service. Check the variable exists: `printenv ZABBIX_RO_TOKEN \| wc -c`. |
 | The model says a source is "unavailable" or "not covered" | Almost always an unset variable, not an outage. An intent whose connector is not configured is withheld from the model, which cannot tell the difference. `ask` prints a `note:` line on stderr naming every source that is off and the variables that turn it on -- read that first. |
-| NetBox `http=000` | Not a bad token — nothing was sent. Either TLS (the chain is incomplete without `SROIAAA_NETBOX_CACERT`) or IPv6 (the AAAA record does not route; `curl -4` proves it). `bin/netbox-probe.sh reach` needs no token and separates the two. |
+| NetBox `http=000` | Not a bad token — nothing was sent. Either TLS (the chain is incomplete without `CASS_NETBOX_CACERT`) or IPv6 (the AAAA record does not route; `curl -4` proves it). `bin/netbox-probe.sh reach` needs no token and separates the two. |
 | `make: *** No rule to make target` | You are not in the repository root. |
 | An answer that is confidently wrong | Expected, and the point of the probe suite. Record it. Most rules in the prompt exist because of one of these. |
 | Answers ignore a feature you just added | You are running a stale binary. `ask` and the digest rebuild every run; a copy in `~/bin` does not. Use `make install`, not `cp`. |
@@ -228,8 +228,8 @@ environment before you believe it.
 ## Which model to use
 
 Model selection is, in descending precedence: the per-call `-model` flag,
-`SROIAAA_MODEL`, then the compiled fallback **`gemma4-31b-vllm`**. A deployment
-should set `SROIAAA_MODEL` to a MindRouter role alias such as `default-agent`;
+`CASS_MODEL`, then the compiled fallback **`gemma4-31b-vllm`**. A deployment
+should set `CASS_MODEL` to a MindRouter role alias such as `default-agent`;
 that lets the gateway change the backing model without rebuilding Cassandra.
 Use `-model` to try a challenger without changing the deployment default.
 
@@ -243,7 +243,7 @@ trusting this page:
 
 ```bash
 curl -s -H "Authorization: Bearer $MINDROUTER_API_KEY" \
-  "$SROIAAA_MINDROUTER_ENDPOINT/v1/models"
+  "$CASS_MINDROUTER_ENDPOINT/v1/models"
 ```
 
 The compiled fallback should not be changed without rerunning the comparison

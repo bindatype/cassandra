@@ -103,10 +103,13 @@ def main():
     ap.add_argument("sizes", nargs="+", type=int)
     args = ap.parse_args()
 
-    base = os.environ.get("SROIAAA_MINDROUTER_ENDPOINT")
+    # The old spelling is still accepted, as everywhere else, so a probe run on
+    # a host that has not migrated does not fail with "set CASS_..." against an
+    # environment that is perfectly good.
+    base = os.environ.get("CASS_MINDROUTER_ENDPOINT") or os.environ.get("SROIAAA_MINDROUTER_ENDPOINT")
     key = os.environ.get("MINDROUTER_API_KEY")
     if not base or not key:
-        sys.exit("set SROIAAA_MINDROUTER_ENDPOINT and MINDROUTER_API_KEY")
+        sys.exit("set CASS_MINDROUTER_ENDPOINT and MINDROUTER_API_KEY")
 
     # Calibrate chars-per-line against this model's own tokeniser once, so the
     # requested size and the served size stay close enough to read as a sweep.

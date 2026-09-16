@@ -4,7 +4,7 @@
 Usage:
     source ~/.config/sroiaaa/env
     python3 scripts/eval_prompt_ab.py [model]
-    RUNS=5 python3 scripts/eval_prompt_ab.py             # uses $SROIAAA_MODEL
+    RUNS=5 python3 scripts/eval_prompt_ab.py             # uses $CASS_MODEL
     RUNS=5 python3 scripts/eval_prompt_ab.py gemma4-31b-vllm
 
 What this does and does not measure
@@ -51,7 +51,7 @@ def zabbix(method, params):
     body = json.dumps({"jsonrpc": "2.0", "method": method, "id": 1,
                        "params": params}).encode()
     req = urllib.request.Request(
-        os.environ["SROIAAA_ZABBIX_ENDPOINT"], data=body, method="POST",
+        os.environ["CASS_ZABBIX_ENDPOINT"], data=body, method="POST",
         headers={"Content-Type": "application/json-rpc",
                  "Authorization": "Bearer " + os.environ["ZABBIX_RO_TOKEN"]})
     return json.load(urllib.request.urlopen(req, context=_CTX, timeout=60))["result"]
@@ -116,7 +116,7 @@ def policy_path():
 
 
 def ask(binary, model, prompt_path, question):
-    env = dict(os.environ, SROIAAA_PROMPT=prompt_path)
+    env = dict(os.environ, CASS_PROMPT=prompt_path)
     started = time.time()
     try:
         proc = subprocess.run(

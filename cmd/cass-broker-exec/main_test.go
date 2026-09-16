@@ -178,7 +178,7 @@ func TestRunRejectsBadInvocations(t *testing.T) {
 }
 
 // TestBothPathsReadTheSameWazuhConfiguration pins a divergence found on
-// 2026-09-02. cass-chat read SROIAAA_WAZUH_CRITICAL_GROUPS and this path
+// 2026-09-02. cass-chat read CASS_WAZUH_CRITICAL_GROUPS and this path
 // did not, so the same plan against the same environment produced evidence
 // that could not say whether a critical agent was affected -- and the
 // connector's own warning ("critical group membership was NOT evaluated")

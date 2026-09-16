@@ -23,7 +23,7 @@ import (
 var embeddedPrompt string
 
 // systemPrompt is the embedded prompt with its rule markers stripped, unless
-// SROIAAA_PROMPT names a file to use instead. The override exists so a prompt
+// CASS_PROMPT names a file to use instead. The override exists so a prompt
 // change can be measured without a rebuild; nothing in normal operation reads
 // it.
 var systemPrompt = loadPrompt()
@@ -57,7 +57,7 @@ func PromptRules() []string {
 const (
 	toolName = "cass_evidence"
 	// Headroom above what any connector will return, so evidence is rejected
-	// here only if a connector's own bound has failed. SROIAAA_MAX_EVIDENCE
+	// here only if a connector's own bound has failed. CASS_MAX_EVIDENCE
 	// raises it in step with a raised connector cap.
 	maxEvidenceJSON = 64 * 1024
 

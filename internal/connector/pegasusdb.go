@@ -19,7 +19,7 @@ const (
 	// thousands of identical rows, which made listing look like the failure
 	// mode. With those collapsed an aggregate returns one row, so this now
 	// binds only on genuine listings and can be generous.
-	// SROIAAA_PEGASUS_MAX_ROWS overrides it.
+	// CASS_PEGASUS_MAX_ROWS overrides it.
 	pegasusDefaultMaxRows = 500
 	pegasusMaxCellBytes   = 4096
 	// Sized against the model context rather than against the database. Every
@@ -28,7 +28,7 @@ const (
 	// that returns more than the orchestrator will accept produces a query
 	// that succeeds and then fails.
 	// Sized for a 32k context, which is what most models here are clamped to.
-	// SROIAAA_PEGASUS_MAX_BYTES raises it for a model with a larger window;
+	// CASS_PEGASUS_MAX_BYTES raises it for a model with a larger window;
 	// raising it globally would overflow the models that do not have one.
 	pegasusMaxTotalBytes = 48 * 1024
 )

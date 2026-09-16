@@ -20,7 +20,7 @@ from eval_common import (ask, build_chat, default_model, normalize, numbers_in,
 # No default list. It named five models, none of which the gateway serves any
 # more -- as of 2026-09-04 it serves exactly one -- so a bare run spent its
 # first call discovering that. Which models exist is a property of the
-# deployment, not of this file, and `curl $SROIAAA_MINDROUTER_ENDPOINT/v1/models`
+# deployment, not of this file, and `curl $CASS_MINDROUTER_ENDPOINT/v1/models`
 # is the authority. Passing none grades whatever the deployment is running.
 
 

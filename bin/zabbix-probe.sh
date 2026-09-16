@@ -21,7 +21,7 @@ set -eu
 # which was a latent version of the bug that stopped `ask` working from
 # anywhere but the repository root.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-POLICY="${SROIAAA_POLICY:-$ROOT/configs/broker-policy.example.json}"
+POLICY="${CASS_POLICY:-${SROIAAA_POLICY:-$ROOT/configs/broker-policy.example.json}}"
 
 # id | question | what a good answer does | what a wrong answer looks like
 cases='
@@ -44,7 +44,7 @@ if [ "${1:-}" = "-l" ]; then
 	exit 0
 fi
 
-required="SROIAAA_MINDROUTER_ENDPOINT MINDROUTER_API_KEY ZABBIX_RO_TOKEN SROIAAA_ZABBIX_ENDPOINT"
+required="CASS_MINDROUTER_ENDPOINT MINDROUTER_API_KEY ZABBIX_RO_TOKEN CASS_ZABBIX_ENDPOINT"
 missing=""
 for name in $required; do
 	eval "value=\${$name:-}"
@@ -56,7 +56,7 @@ if [ -n "$missing" ]; then
 	exit 2
 fi
 
-BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
+BIN=${CASS_BIN:-${SROIAAA_BIN:-"$ROOT/runtime"}}
 # Built once rather than `go run` per question: go resolves the module from the
 # working directory, so `go run` failed outright from anywhere but the
 # repository root, and it recompiled for each of the nine cases when it worked.

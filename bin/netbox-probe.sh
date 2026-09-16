@@ -13,18 +13,18 @@
 #   bin/netbox-probe.sh reach        # only reachability and TLS, no token needed
 #
 # Environment:
-#   SROIAAA_NETBOX_ENDPOINT   e.g. https://netbox.arc.gwu.edu
+#   CASS_NETBOX_ENDPOINT   e.g. https://netbox.arc.gwu.edu
 #   NETBOX_RO_TOKEN           read-only API token
-#   SROIAAA_NETBOX_CACERT     optional: PEM holding the issuing intermediate
-#   SROIAAA_NETBOX_INSECURE   optional: set to 1 to skip verification entirely
+#   CASS_NETBOX_CACERT     optional: PEM holding the issuing intermediate
+#   CASS_NETBOX_INSECURE   optional: set to 1 to skip verification entirely
 set -eu
 
-ENDPOINT=${SROIAAA_NETBOX_ENDPOINT:-}
+ENDPOINT=${CASS_NETBOX_ENDPOINT:-${SROIAAA_NETBOX_ENDPOINT:-}}
 TOKEN=${NETBOX_RO_TOKEN:-}
 ONLY=${1:-all}
 
 if [ -z "$ENDPOINT" ]; then
-	echo "netbox-probe: SROIAAA_NETBOX_ENDPOINT is not set" >&2
+	echo "netbox-probe: CASS_NETBOX_ENDPOINT is not set" >&2
 	echo "netbox-probe: see docs/onboarding.md, and note that every line in the" >&2
 	echo "netbox-probe: env file needs 'export' or the value is not inherited" >&2
 	exit 2
@@ -36,12 +36,13 @@ ENDPOINT=${ENDPOINT%/}
 # spelled the same way.
 TLS=""
 TLS_NOTE="system trust store"
-if [ -n "${SROIAAA_NETBOX_CACERT:-}" ]; then
-	TLS="--cacert $SROIAAA_NETBOX_CACERT"
-	TLS_NOTE="pinned CA: $SROIAAA_NETBOX_CACERT"
-elif [ "${SROIAAA_NETBOX_INSECURE:-0}" = "1" ]; then
+CACERT=${CASS_NETBOX_CACERT:-${SROIAAA_NETBOX_CACERT:-}}
+if [ -n "$CACERT" ]; then
+	TLS="--cacert $CACERT"
+	TLS_NOTE="pinned CA: $CACERT"
+elif [ "${CASS_NETBOX_INSECURE:-0}" = "1" ]; then
 	TLS="-k"
-	TLS_NOTE="VERIFICATION DISABLED (SROIAAA_NETBOX_INSECURE=1)"
+	TLS_NOTE="VERIFICATION DISABLED (CASS_NETBOX_INSECURE=1)"
 fi
 
 hr() { printf '\n== %s ==\n' "$1"; }
@@ -102,7 +103,7 @@ else
 	echo 'netbox-probe:' >&2
 	echo 'netbox-probe:   curl -so /tmp/i.crt http://crt.sectigo.com/InCommonRSAOVSSLCA3.crt' >&2
 	echo 'netbox-probe:   openssl x509 -inform DER -in /tmp/i.crt -out ~/.config/sroiaaa/netbox-ca.pem' >&2
-	echo 'netbox-probe:   export SROIAAA_NETBOX_CACERT=$HOME/.config/sroiaaa/netbox-ca.pem' >&2
+	echo 'netbox-probe:   export CASS_NETBOX_CACERT=$HOME/.config/sroiaaa/netbox-ca.pem' >&2
 	exit 1
 fi
 

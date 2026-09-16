@@ -41,7 +41,7 @@ Core constraints:
 ## Layout
 
 ```text
-cmd/cass-agent/         endpoint agent
+cmd/cassd/         endpoint agent
 cmd/cass-broker-plan/   turns an intent into a route plan
 cmd/cass-broker-exec/   executes a route plan against live sources
 cmd/cass-chat/          asks a question in natural language
@@ -63,7 +63,7 @@ testdata/varlog/           sample log files mounted into the container
 ```bash
 git clone https://github.com/bindatype/cassandra.git
 cd Cassandra
-export SROIAAA_AUTH_TOKEN="${SROIAAA_AUTH_TOKEN:-dev-cass-token}"
+export CASS_AUTH_TOKEN="${CASS_AUTH_TOKEN:-dev-cass-token}"
 ```
 
 Every command below runs from the repository root. `make help` lists the
@@ -81,7 +81,7 @@ Joining the project rather than just running it? Start with
 
 ```bash
 go test ./...
-go run ./cmd/cass-agent
+go run ./cmd/cassd
 ```
 
 The native server listens on `127.0.0.1:8080` by default and requires a
@@ -92,14 +92,14 @@ TLS-authenticated broker or reverse proxy.
 To override the host-run port explicitly:
 
 ```bash
-SROIAAA_BIND_ADDR=127.0.0.1:18081 go run ./cmd/cass-agent
+CASS_BIND_ADDR=127.0.0.1:18081 go run ./cmd/cassd
 ```
 
 To listen on all IPv6 interfaces, including IPv4 where the host permits
 dual-stack sockets:
 
 ```bash
-SROIAAA_BIND_ADDR='[::]:18081' go run ./cmd/cass-agent
+CASS_BIND_ADDR='[::]:18081' go run ./cmd/cassd
 ```
 
 ### Cross-architecture builds
@@ -113,8 +113,8 @@ make build-linux-all
 
 This writes:
 
-- `dist/cass-agent-linux-amd64`
-- `dist/cass-agent-linux-arm64`
+- `dist/cassd-linux-amd64`
+- `dist/cassd-linux-arm64`
 
 ### Docker harness
 
@@ -168,7 +168,7 @@ Capabilities:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $SROIAAA_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CASS_AUTH_TOKEN" \
   http://127.0.0.1:18080/v1/capabilities | jq .
 ```
 
@@ -176,7 +176,7 @@ Host info:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:18080/v1/operations \
-  -H "Authorization: Bearer $SROIAAA_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CASS_AUTH_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "operation": "host.info"
@@ -187,7 +187,7 @@ List a directory:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:18080/v1/operations \
-  -H "Authorization: Bearer $SROIAAA_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CASS_AUTH_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "operation": "filesystem.list",
@@ -200,7 +200,7 @@ Tail a log:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:18080/v1/operations \
-  -H "Authorization: Bearer $SROIAAA_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CASS_AUTH_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "operation": "filesystem.tail",
@@ -213,33 +213,33 @@ curl -fsS -X POST http://127.0.0.1:18080/v1/operations \
 
 Configuration is environment-driven:
 
-- `SROIAAA_BIND_ADDR` default `127.0.0.1:8080`
-- `SROIAAA_AUTH_TOKEN` required single bearer token
-- `SROIAAA_AUTH_TOKENS` optional comma-separated additional valid tokens for rotation
-- `SROIAAA_ALLOWED_ROOTS` default `/workspace,/tmp,/var/log/cass`
-- `SROIAAA_PROC_ROOT` default `/proc`
-- `SROIAAA_ENABLED_OPERATIONS` default `capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail`
-- `SROIAAA_HOST_INFO_FIELDS` default `hostname,os,arch,cpus,uptime_seconds,kernel_version`
-- `SROIAAA_MAX_REQUEST_BYTES` default `65536`
-- `SROIAAA_MAX_READ_BYTES` default `65536`
-- `SROIAAA_MAX_TAIL_BYTES` default `65536`
-- `SROIAAA_MAX_LIST_ENTRIES` default `256`
-- `SROIAAA_MAX_PROCESS_ENTRIES` default `256`
-- `SROIAAA_AUDIT_PATH` default `runtime/audit.log`
-- `SROIAAA_READ_HEADER_TIMEOUT` default `5s`
-- `SROIAAA_READ_TIMEOUT` default `15s`
-- `SROIAAA_WRITE_TIMEOUT` default `30s`
-- `SROIAAA_IDLE_TIMEOUT` default `60s`
+- `CASS_BIND_ADDR` default `127.0.0.1:8080`
+- `CASS_AUTH_TOKEN` required single bearer token
+- `CASS_AUTH_TOKENS` optional comma-separated additional valid tokens for rotation
+- `CASS_ALLOWED_ROOTS` default `/workspace,/tmp,/var/log/cass`
+- `CASS_PROC_ROOT` default `/proc`
+- `CASS_ENABLED_OPERATIONS` default `capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail`
+- `CASS_HOST_INFO_FIELDS` default `hostname,os,arch,cpus,uptime_seconds,kernel_version`
+- `CASS_MAX_REQUEST_BYTES` default `65536`
+- `CASS_MAX_READ_BYTES` default `65536`
+- `CASS_MAX_TAIL_BYTES` default `65536`
+- `CASS_MAX_LIST_ENTRIES` default `256`
+- `CASS_MAX_PROCESS_ENTRIES` default `256`
+- `CASS_AUDIT_PATH` default `runtime/audit.log`
+- `CASS_READ_HEADER_TIMEOUT` default `5s`
+- `CASS_READ_TIMEOUT` default `15s`
+- `CASS_WRITE_TIMEOUT` default `30s`
+- `CASS_IDLE_TIMEOUT` default `60s`
 
 Unknown operation or host-information names are rejected during startup.
-Setting `SROIAAA_ENABLED_OPERATIONS` to an explicit empty value disables
+Setting `CASS_ENABLED_OPERATIONS` to an explicit empty value disables
 all operations. If `host.info` is enabled, at least one allowed host field
 must be configured.
 
 To opt into bounded process metadata, append `process.list` explicitly:
 
 ```bash
-export SROIAAA_ENABLED_OPERATIONS='capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail,process.list'
+export CASS_ENABLED_OPERATIONS='capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail,process.list'
 ```
 
 The audit log is forced to mode `0600`. Authenticated events contain a
@@ -325,8 +325,8 @@ echo '{"intent":"monitoring.problems","host":"dss01"}' \
 Both halves take the policy. The planner uses it to authorize; the executor
 uses it to verify what it was given.
 
-Model selection is `-model`, then `SROIAAA_MODEL`, then the compiled
-`gemma4-31b-vllm` fallback. Deployments should set `SROIAAA_MODEL` to a
+Model selection is `-model`, then `CASS_MODEL`, then the compiled
+`gemma4-31b-vllm` fallback. Deployments should set `CASS_MODEL` to a
 MindRouter alias such as `default-agent`; use `-model` for a one-off
 challenger. Do not change a deployment default without rerunning the
 evaluation suite -- and note that as of 2026-09-04 the gateway serves exactly
@@ -362,19 +362,19 @@ and dates. Ticket content and transaction history are never fetched; see
 [docs/adding-a-connector.md](docs/adding-a-connector.md).
 
 Only intents whose connector is configured are offered to the model. Endpoint
-evidence is enabled by `SROIAAA_AGENT_CONFIG`, a host-to-agent map held in the
+evidence is enabled by `CASS_AGENT_CONFIG`, a host-to-agent map held in the
 operator environment, never in a route plan. Each host has its own endpoint
 and bearer token, and remote agents must use HTTPS:
 
 **No endpoint agent is deployed in this environment yet.** The connector is
-written and tested, and `cmd/cass-agent` has existed since Phase One, but
+written and tested, and `cmd/cassd` has existed since Phase One, but
 nothing is running it as a service: there is no systemd unit and no host in
-`SROIAAA_AGENT_CONFIG`. Until one exists, `live.evidence` is planned and
+`CASS_AGENT_CONFIG`. Until one exists, `live.evidence` is planned and
 authorized by the broker and withheld from the model, exactly as it was before
 the connector was written. Deferred deliberately, not abandoned.
 
 ```bash
-export SROIAAA_AGENT_CONFIG='{
+export CASS_AGENT_CONFIG='{
   "sgtstubby.arc.gwu.edu": {
     "endpoint": "https://sgtstubby.arc.gwu.edu:8443",
     "token": "the-read-only-agent-token-for-sgtstubby"
@@ -408,21 +408,21 @@ mkdir -p ~/.config/sroiaaa && chmod 700 ~/.config/sroiaaa
 umask 077
 cat > ~/.config/sroiaaa/env <<'ENVEOF'
 export MINDROUTER_API_KEY=...
-export SROIAAA_MINDROUTER_ENDPOINT=http://localhost:8000
-export SROIAAA_MODEL=default-agent
-export SROIAAA_ZABBIX_ENDPOINT=https://zabbix.example.edu/api_jsonrpc.php
+export CASS_MINDROUTER_ENDPOINT=http://localhost:8000
+export CASS_MODEL=default-agent
+export CASS_ZABBIX_ENDPOINT=https://zabbix.example.edu/api_jsonrpc.php
 export ZABBIX_RO_TOKEN=...
-export SROIAAA_WAZUH_ENDPOINT=https://wazuh.example.edu:55000
+export CASS_WAZUH_ENDPOINT=https://wazuh.example.edu:55000
 export WAZUH_API_USERNAME=...
 export WAZUH_API_PASSWORD=...
-export SROIAAA_RT_ENDPOINT=https://rt.example.edu
+export CASS_RT_ENDPOINT=https://rt.example.edu
 export RT_API_TOKEN=...
-export SROIAAA_RT_QUEUES=Ops,Helpdesk
+export CASS_RT_QUEUES=Ops,Helpdesk
 ENVEOF
 chmod 600 ~/.config/sroiaaa/env
 ```
 
-`SROIAAA_RT_QUEUES` is a comma-separated allowlist of RT queue names. An
+`CASS_RT_QUEUES` is a comma-separated allowlist of RT queue names. An
 empty or unset value refuses to construct the RT connector: there is no
 safe default queue set, so a plan that needs RT and finds no queues
 configured fails closed rather than searching every queue in the instance.

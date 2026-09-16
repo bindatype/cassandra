@@ -32,7 +32,7 @@ func main() {
 	service := agent.NewService(cfg, auditor)
 	server := newHTTPServer(cfg, agent.NewHandler(service, cfg))
 
-	log.Printf("cass-agent listening on %s", cfg.BindAddr)
+	log.Printf("cassd listening on %s", cfg.BindAddr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("listen: %v", err)
 	}
