@@ -3,14 +3,24 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/bindatype/cassandra/internal/agent"
+	"github.com/bindatype/cassandra/internal/env"
 )
 
 func main() {
 	cfg, err := agent.LoadConfigFromEnv()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	// A long-running service, so this is said once at startup rather than
+	// per request. It goes through log like everything else here: the agent's
+	// output is a journal, not a terminal, and a bare stderr write would be
+	// the one line in it without a timestamp.
+	var legacy strings.Builder
+	if env.ReportLegacy(&legacy) {
+		log.Print(strings.TrimSpace(legacy.String()))
 	}
 
 	auditor, err := agent.NewAuditor(cfg.AuditPath)

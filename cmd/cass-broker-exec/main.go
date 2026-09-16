@@ -13,34 +13,35 @@ import (
 
 	"github.com/bindatype/cassandra/internal/broker"
 	"github.com/bindatype/cassandra/internal/connector"
+	"github.com/bindatype/cassandra/internal/env"
 )
 
 const (
-	zabbixEndpointEnv  = "SROIAAA_ZABBIX_ENDPOINT"
+	zabbixEndpointEnv  = "CASS_ZABBIX_ENDPOINT"
 	zabbixTokenEnv     = "ZABBIX_RO_TOKEN"
-	wazuhEndpointEnv   = "SROIAAA_WAZUH_ENDPOINT"
+	wazuhEndpointEnv   = "CASS_WAZUH_ENDPOINT"
 	wazuhUsernameEnv   = "WAZUH_API_USERNAME"
 	wazuhPasswordEnv   = "WAZUH_API_PASSWORD"
-	pegasusDSNEnv      = "SROIAAA_PEGASUS_DSN"
-	pegasusMaxRowsEnv  = "SROIAAA_PEGASUS_MAX_ROWS"
-	pegasusMaxBytesEnv = "SROIAAA_PEGASUS_MAX_BYTES"
-	rtEndpointEnv      = "SROIAAA_RT_ENDPOINT"
+	pegasusDSNEnv      = "CASS_PEGASUS_DSN"
+	pegasusMaxRowsEnv  = "CASS_PEGASUS_MAX_ROWS"
+	pegasusMaxBytesEnv = "CASS_PEGASUS_MAX_BYTES"
+	rtEndpointEnv      = "CASS_RT_ENDPOINT"
 	rtTokenEnv         = "RT_API_TOKEN"
 	// cassAgentConfigEnv is a JSON host map. Each entry contains the one
 	// endpoint and bearer token approved for that policy host; plans never
 	// carry either value.
-	cassAgentConfigEnv = "SROIAAA_AGENT_CONFIG"
+	cassAgentConfigEnv = "CASS_AGENT_CONFIG"
 	// rtQueuesEnv names the RT queues this deployment allows searching, as a
 	// comma-separated list. Site configuration, so it lives here rather than
 	// in the connector: RT queues are organization-specific and there is no
 	// safe default that includes any of them.
-	rtQueuesEnv = "SROIAAA_RT_QUEUES"
+	rtQueuesEnv = "CASS_RT_QUEUES"
 	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated.
 	// cass-chat has always read it; this path did not, so the same plan
 	// against the same environment produced evidence that could not say
 	// whether a critical agent was affected. Two paths the README calls
 	// equivalent must read the same configuration.
-	wazuhCriticalGroupsEnv = "SROIAAA_WAZUH_CRITICAL_GROUPS"
+	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
 )
 
 func main() {
@@ -51,14 +52,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("cass-broker-exec", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	policyPath := flags.String("policy", "", "broker policy the plan is verified against (required)")
-	zabbixEndpoint := flags.String("zabbix-endpoint", os.Getenv(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
-	wazuhEndpoint := flags.String("wazuh-endpoint", os.Getenv(wazuhEndpointEnv), "Wazuh API base URL")
+	zabbixEndpoint := flags.String("zabbix-endpoint", env.Get(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
+	wazuhEndpoint := flags.String("wazuh-endpoint", env.Get(wazuhEndpointEnv), "Wazuh API base URL")
 	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API (required where the manager presents a self-signed certificate)")
-	rtEndpoint := flags.String("rt-endpoint", os.Getenv(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
+	rtEndpoint := flags.String("rt-endpoint", env.Get(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
 	timeout := flags.Duration("timeout", 20*time.Second, "overall execution timeout")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	// Said once, after the flags have pulled their defaults from the
+	// environment, so a run that still depends on the old variable names says
+	// so out loud. This is what makes the compatibility temporary rather than
+	// permanent: silence here is how a shim outlives the rename.
+	env.ReportLegacy(stderr)
 
 	if *policyPath == "" {
 		fmt.Fprintln(stderr, "cass-broker-exec: -policy is required")
@@ -183,7 +189,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		if options.zabbixEndpoint == "" {
 			return nil, fmt.Errorf("plan needs Zabbix: set -zabbix-endpoint or %s", zabbixEndpointEnv)
 		}
-		token := os.Getenv(zabbixTokenEnv)
+		token := env.Get(zabbixTokenEnv)
 		if token == "" {
 			return nil, fmt.Errorf("plan needs Zabbix: %s is not set (note that a value in ~/.bashrc must also be exported)", zabbixTokenEnv)
 		}
@@ -201,8 +207,8 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		if options.wazuhEndpoint == "" {
 			return nil, fmt.Errorf("plan needs Wazuh: set -wazuh-endpoint or %s", wazuhEndpointEnv)
 		}
-		username := os.Getenv(wazuhUsernameEnv)
-		password := os.Getenv(wazuhPasswordEnv)
+		username := env.Get(wazuhUsernameEnv)
+		password := env.Get(wazuhPasswordEnv)
 		if username == "" || password == "" {
 			return nil, fmt.Errorf("plan needs Wazuh: %s and %s must both be set and exported", wazuhUsernameEnv, wazuhPasswordEnv)
 		}
@@ -211,7 +217,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 			Username:           username,
 			Password:           password,
 			InsecureSkipVerify: options.wazuhInsecure,
-			CriticalGroups:     splitList(os.Getenv(wazuhCriticalGroupsEnv)),
+			CriticalGroups:     splitList(env.Get(wazuhCriticalGroupsEnv)),
 		})
 		if err != nil {
 			return nil, err
@@ -220,7 +226,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 	}
 
 	if needed[broker.SourcePegasusDB] {
-		dsn := os.Getenv(pegasusDSNEnv)
+		dsn := env.Get(pegasusDSNEnv)
 		if dsn == "" {
 			return nil, fmt.Errorf("plan needs the accounting database: %s must be set and exported", pegasusDSNEnv)
 		}
@@ -235,14 +241,14 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		if options.rtEndpoint == "" {
 			return nil, fmt.Errorf("plan needs RT: set -rt-endpoint or %s", rtEndpointEnv)
 		}
-		token := os.Getenv(rtTokenEnv)
+		token := env.Get(rtTokenEnv)
 		if token == "" {
 			return nil, fmt.Errorf("plan needs RT: %s is not set (note that a value in ~/.bashrc must also be exported)", rtTokenEnv)
 		}
 		// The connector refuses an empty allowlist, correctly and fail-closed,
 		// but it is a library and cannot name the variable that would fix it.
 		// The caller knows; say it here.
-		queues := splitList(os.Getenv(rtQueuesEnv))
+		queues := splitList(env.Get(rtQueuesEnv))
 		if len(queues) == 0 {
 			return nil, fmt.Errorf("plan needs RT: %s is not set (and must be exported); "+
 				"there is no safe default queue set, so the search is refused rather than run against every queue", rtQueuesEnv)
@@ -259,7 +265,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 	}
 
 	if needed[broker.SourceCass] {
-		agents, err := connector.ParseCassAgents(os.Getenv(cassAgentConfigEnv))
+		agents, err := connector.ParseCassAgents(env.Get(cassAgentConfigEnv))
 		if err != nil {
 			return nil, fmt.Errorf("plan needs an endpoint agent: set %s: %w", cassAgentConfigEnv, err)
 		}
@@ -296,7 +302,7 @@ func splitList(value string) []string {
 // pegasusMaxRows reads the row cap override, falling back to the connector's
 // default when unset or unparseable.
 func pegasusMaxRows() int {
-	value := os.Getenv(pegasusMaxRowsEnv)
+	value := env.Get(pegasusMaxRowsEnv)
 	if value == "" {
 		return 0
 	}
@@ -311,7 +317,7 @@ func pegasusMaxRows() int {
 // connector default when unset. Raise it only alongside a model whose context
 // window can hold the result.
 func pegasusMaxBytes() int {
-	value := os.Getenv(pegasusMaxBytesEnv)
+	value := env.Get(pegasusMaxBytesEnv)
 	if value == "" {
 		return 0
 	}

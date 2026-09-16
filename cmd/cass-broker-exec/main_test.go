@@ -198,7 +198,7 @@ func TestBothPathsReadTheSameWazuhConfiguration(t *testing.T) {
 		t.Fatalf("read cass-chat source: %v", err)
 	}
 	for _, name := range []string{
-		"SROIAAA_WAZUH_CRITICAL_GROUPS", "SROIAAA_RT_QUEUES", "RT_API_TOKEN", "SROIAAA_RT_ENDPOINT", "SROIAAA_AGENT_CONFIG",
+		"CASS_WAZUH_CRITICAL_GROUPS", "CASS_RT_QUEUES", "RT_API_TOKEN", "CASS_RT_ENDPOINT", "CASS_AGENT_CONFIG",
 	} {
 		if strings.Contains(string(chat), name) != strings.Contains(string(source), name) {
 			t.Errorf("%s is read by one execution path and not the other", name)

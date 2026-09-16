@@ -16,6 +16,7 @@ import (
 
 	"github.com/bindatype/cassandra/internal/broker"
 	"github.com/bindatype/cassandra/internal/connector"
+	"github.com/bindatype/cassandra/internal/env"
 )
 
 //go:embed prompt.md
@@ -35,7 +36,7 @@ var ruleEnd = regexp.MustCompile(`(?m)^<!-- /rule -->\n`)
 
 func loadPrompt() string {
 	text := embeddedPrompt
-	if path := os.Getenv("SROIAAA_PROMPT"); path != "" {
+	if path := env.Get("CASS_PROMPT"); path != "" {
 		if raw, err := os.ReadFile(path); err == nil {
 			text = string(raw)
 		}
@@ -699,7 +700,7 @@ func describesACallInstead(answer string) bool {
 // model. It tracks the connector caps: raising one without the other produces
 // a query that succeeds and is then refused.
 func evidenceBudget() int {
-	if value := os.Getenv("SROIAAA_MAX_EVIDENCE"); value != "" {
+	if value := env.Get("CASS_MAX_EVIDENCE"); value != "" {
 		if size, err := strconv.Atoi(value); err == nil && size > 0 {
 			return size
 		}

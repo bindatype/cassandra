@@ -21,16 +21,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bindatype/cassandra/internal/env"
 	"github.com/bindatype/cassandra/internal/zoom"
 )
 
 const (
-	urlEnv    = "SROIAAA_ZOOM_WEBHOOK_URL"
-	tokenEnv  = "SROIAAA_ZOOM_WEBHOOK_TOKEN"
-	secretEnv = "SROIAAA_ZOOM_WEBHOOK_SECRET"
+	urlEnv    = "CASS_ZOOM_WEBHOOK_URL"
+	tokenEnv  = "CASS_ZOOM_WEBHOOK_TOKEN"
+	secretEnv = "CASS_ZOOM_WEBHOOK_SECRET"
 	// variantEnv pins the signature construction once -probe has identified it,
 	// without a rebuild.
-	variantEnv = "SROIAAA_ZOOM_SIGNATURE_VARIANT"
+	variantEnv = "CASS_ZOOM_SIGNATURE_VARIANT"
 
 	// maxInput bounds what will be read from a pipe. An answer is a paragraph;
 	// anything approaching this size means the upstream command failed in a way
@@ -52,6 +53,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	// Said once, after the flags have pulled their defaults from the
+	// environment, so a run that still depends on the old variable names says
+	// so out loud. This is what makes the compatibility temporary rather than
+	// permanent: silence here is how a shim outlives the rename.
+	env.ReportLegacy(stderr)
 
 	if *probe {
 		return runProbe(stdout, stderr, *timeout)
@@ -99,14 +105,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func newClient() (*zoom.Client, error) {
-	variant, err := zoom.VariantByName(os.Getenv(variantEnv))
+	variant, err := zoom.VariantByName(env.Get(variantEnv))
 	if err != nil {
 		return nil, err
 	}
 	return zoom.New(zoom.Config{
-		URL:     os.Getenv(urlEnv),
-		Token:   os.Getenv(tokenEnv),
-		Secret:  os.Getenv(secretEnv),
+		URL:     env.Get(urlEnv),
+		Token:   env.Get(tokenEnv),
+		Secret:  env.Get(secretEnv),
 		Variant: variant,
 	})
 }

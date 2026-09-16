@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bindatype/cassandra/internal/env"
 )
 
 const (
@@ -39,7 +41,7 @@ type Config struct {
 
 func LoadConfigFromEnv() (Config, error) {
 	enabledOperations, err := loadConfiguredNames(
-		"SROIAAA_ENABLED_OPERATIONS",
+		"CASS_ENABLED_OPERATIONS",
 		defaultEnabledOperations(),
 		knownOperations,
 	)
@@ -47,7 +49,7 @@ func LoadConfigFromEnv() (Config, error) {
 		return Config{}, err
 	}
 	hostInfoFields, err := loadConfiguredNames(
-		"SROIAAA_HOST_INFO_FIELDS",
+		"CASS_HOST_INFO_FIELDS",
 		defaultHostInfoFields(),
 		knownHostInfoFields,
 	)
@@ -56,24 +58,24 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 
 	cfg := Config{
-		BindAddr:          envOrDefault("SROIAAA_BIND_ADDR", defaultBindAddr),
+		BindAddr:          envOrDefault("CASS_BIND_ADDR", defaultBindAddr),
 		AuthTokens:        loadAuthTokensFromEnv(),
-		ProcRoot:          envOrDefault("SROIAAA_PROC_ROOT", "/proc"),
+		ProcRoot:          envOrDefault("CASS_PROC_ROOT", "/proc"),
 		EnabledOperations: enabledOperations,
 		HostInfoFields:    hostInfoFields,
-		AuditPath:         envOrDefault("SROIAAA_AUDIT_PATH", "runtime/audit.log"),
-		MaxRequestBytes:   envInt64("SROIAAA_MAX_REQUEST_BYTES", defaultMaxRequestBytes),
-		MaxReadBytes:      envInt64("SROIAAA_MAX_READ_BYTES", 65536),
-		MaxTailBytes:      envInt64("SROIAAA_MAX_TAIL_BYTES", 65536),
-		MaxListEntries:    int(envInt64("SROIAAA_MAX_LIST_ENTRIES", 256)),
-		MaxProcessEntries: int(envInt64("SROIAAA_MAX_PROCESS_ENTRIES", 256)),
-		ReadHeaderTimeout: envDuration("SROIAAA_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
-		ReadTimeout:       envDuration("SROIAAA_READ_TIMEOUT", defaultReadTimeout),
-		WriteTimeout:      envDuration("SROIAAA_WRITE_TIMEOUT", defaultWriteTimeout),
-		IdleTimeout:       envDuration("SROIAAA_IDLE_TIMEOUT", defaultIdleTimeout),
+		AuditPath:         envOrDefault("CASS_AUDIT_PATH", "runtime/audit.log"),
+		MaxRequestBytes:   envInt64("CASS_MAX_REQUEST_BYTES", defaultMaxRequestBytes),
+		MaxReadBytes:      envInt64("CASS_MAX_READ_BYTES", 65536),
+		MaxTailBytes:      envInt64("CASS_MAX_TAIL_BYTES", 65536),
+		MaxListEntries:    int(envInt64("CASS_MAX_LIST_ENTRIES", 256)),
+		MaxProcessEntries: int(envInt64("CASS_MAX_PROCESS_ENTRIES", 256)),
+		ReadHeaderTimeout: envDuration("CASS_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
+		ReadTimeout:       envDuration("CASS_READ_TIMEOUT", defaultReadTimeout),
+		WriteTimeout:      envDuration("CASS_WRITE_TIMEOUT", defaultWriteTimeout),
+		IdleTimeout:       envDuration("CASS_IDLE_TIMEOUT", defaultIdleTimeout),
 	}
 
-	roots := strings.Split(envOrDefault("SROIAAA_ALLOWED_ROOTS", "/workspace,/tmp,/var/log/cass"), ",")
+	roots := strings.Split(envOrDefault("CASS_ALLOWED_ROOTS", "/workspace,/tmp,/var/log/cass"), ",")
 	for _, root := range roots {
 		root = strings.TrimSpace(root)
 		if root == "" {
@@ -132,10 +134,10 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 
 func loadAuthTokensFromEnv() []string {
 	values := []string{}
-	if single := strings.TrimSpace(os.Getenv("SROIAAA_AUTH_TOKEN")); single != "" {
+	if single := strings.TrimSpace(env.Get("CASS_AUTH_TOKEN")); single != "" {
 		values = append(values, single)
 	}
-	if multi := os.Getenv("SROIAAA_AUTH_TOKENS"); multi != "" {
+	if multi := env.Get("CASS_AUTH_TOKENS"); multi != "" {
 		for _, value := range strings.Split(multi, ",") {
 			if trimmed := strings.TrimSpace(value); trimmed != "" {
 				values = append(values, trimmed)

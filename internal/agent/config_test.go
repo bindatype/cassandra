@@ -9,8 +9,8 @@ import (
 )
 
 func TestLoadConfigFromEnvRequiresAuthToken(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "")
-	t.Setenv("SROIAAA_AUTH_TOKENS", "")
+	t.Setenv("CASS_AUTH_TOKEN", "")
+	t.Setenv("CASS_AUTH_TOKENS", "")
 
 	_, err := LoadConfigFromEnv()
 	if err == nil {
@@ -22,8 +22,8 @@ func TestLoadConfigFromEnvRequiresAuthToken(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvLoadsDistinctAuthTokens(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "primary-token")
-	t.Setenv("SROIAAA_AUTH_TOKENS", "rotated-token, primary-token , canary-token")
+	t.Setenv("CASS_AUTH_TOKEN", "primary-token")
+	t.Setenv("CASS_AUTH_TOKENS", "rotated-token, primary-token , canary-token")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -37,13 +37,13 @@ func TestLoadConfigFromEnvLoadsDistinctAuthTokens(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvUsesHardenedHTTPDefaults(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_BIND_ADDR", "")
-	t.Setenv("SROIAAA_MAX_REQUEST_BYTES", "")
-	t.Setenv("SROIAAA_READ_HEADER_TIMEOUT", "")
-	t.Setenv("SROIAAA_READ_TIMEOUT", "")
-	t.Setenv("SROIAAA_WRITE_TIMEOUT", "")
-	t.Setenv("SROIAAA_IDLE_TIMEOUT", "")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_BIND_ADDR", "")
+	t.Setenv("CASS_MAX_REQUEST_BYTES", "")
+	t.Setenv("CASS_READ_HEADER_TIMEOUT", "")
+	t.Setenv("CASS_READ_TIMEOUT", "")
+	t.Setenv("CASS_WRITE_TIMEOUT", "")
+	t.Setenv("CASS_IDLE_TIMEOUT", "")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -63,13 +63,13 @@ func TestLoadConfigFromEnvUsesHardenedHTTPDefaults(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvLoadsHTTPOverrides(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_BIND_ADDR", "[::]:18081")
-	t.Setenv("SROIAAA_MAX_REQUEST_BYTES", "4096")
-	t.Setenv("SROIAAA_READ_HEADER_TIMEOUT", "2s")
-	t.Setenv("SROIAAA_READ_TIMEOUT", "3s")
-	t.Setenv("SROIAAA_WRITE_TIMEOUT", "4s")
-	t.Setenv("SROIAAA_IDLE_TIMEOUT", "5s")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_BIND_ADDR", "[::]:18081")
+	t.Setenv("CASS_MAX_REQUEST_BYTES", "4096")
+	t.Setenv("CASS_READ_HEADER_TIMEOUT", "2s")
+	t.Setenv("CASS_READ_TIMEOUT", "3s")
+	t.Setenv("CASS_WRITE_TIMEOUT", "4s")
+	t.Setenv("CASS_IDLE_TIMEOUT", "5s")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -86,9 +86,9 @@ func TestLoadConfigFromEnvLoadsHTTPOverrides(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvUsesSafeOperationDefaults(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	unsetEnv(t, "SROIAAA_ENABLED_OPERATIONS")
-	unsetEnv(t, "SROIAAA_HOST_INFO_FIELDS")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	unsetEnv(t, "CASS_ENABLED_OPERATIONS")
+	unsetEnv(t, "CASS_HOST_INFO_FIELDS")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -103,9 +103,9 @@ func TestLoadConfigFromEnvUsesSafeOperationDefaults(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvLoadsExplicitSecurityPolicy(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_ENABLED_OPERATIONS", "host.info,process.list,host.info")
-	t.Setenv("SROIAAA_HOST_INFO_FIELDS", "arch,uptime_seconds")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_ENABLED_OPERATIONS", "host.info,process.list,host.info")
+	t.Setenv("CASS_HOST_INFO_FIELDS", "arch,uptime_seconds")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -120,8 +120,8 @@ func TestLoadConfigFromEnvLoadsExplicitSecurityPolicy(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvRejectsUnknownOperation(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_ENABLED_OPERATIONS", "filesystem.read,shell.execute")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_ENABLED_OPERATIONS", "filesystem.read,shell.execute")
 
 	_, err := LoadConfigFromEnv()
 	if err == nil || !strings.Contains(err.Error(), "unsupported value") {
@@ -130,8 +130,8 @@ func TestLoadConfigFromEnvRejectsUnknownOperation(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvRejectsUnknownHostInfoField(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_HOST_INFO_FIELDS", "arch,environment")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_HOST_INFO_FIELDS", "arch,environment")
 
 	_, err := LoadConfigFromEnv()
 	if err == nil || !strings.Contains(err.Error(), "unsupported value") {
@@ -140,9 +140,9 @@ func TestLoadConfigFromEnvRejectsUnknownHostInfoField(t *testing.T) {
 }
 
 func TestLoadConfigFromEnvRequiresFieldsWhenHostInfoEnabled(t *testing.T) {
-	t.Setenv("SROIAAA_AUTH_TOKEN", "test-token")
-	t.Setenv("SROIAAA_ENABLED_OPERATIONS", "host.info")
-	t.Setenv("SROIAAA_HOST_INFO_FIELDS", "")
+	t.Setenv("CASS_AUTH_TOKEN", "test-token")
+	t.Setenv("CASS_ENABLED_OPERATIONS", "host.info")
+	t.Setenv("CASS_HOST_INFO_FIELDS", "")
 
 	_, err := LoadConfigFromEnv()
 	if err == nil || !strings.Contains(err.Error(), "host.info requires") {

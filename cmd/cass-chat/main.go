@@ -12,34 +12,35 @@ import (
 
 	"github.com/bindatype/cassandra/internal/broker"
 	"github.com/bindatype/cassandra/internal/connector"
+	"github.com/bindatype/cassandra/internal/env"
 	"github.com/bindatype/cassandra/internal/orchestrator"
 )
 
 const (
-	mindrouterEndpointEnv = "SROIAAA_MINDROUTER_ENDPOINT"
+	mindrouterEndpointEnv = "CASS_MINDROUTER_ENDPOINT"
 	mindrouterKeyEnv      = "MINDROUTER_API_KEY"
-	mindrouterModelEnv    = "SROIAAA_MODEL"
-	zabbixEndpointEnv     = "SROIAAA_ZABBIX_ENDPOINT"
+	mindrouterModelEnv    = "CASS_MODEL"
+	zabbixEndpointEnv     = "CASS_ZABBIX_ENDPOINT"
 	zabbixTokenEnv        = "ZABBIX_RO_TOKEN"
-	wazuhEndpointEnv      = "SROIAAA_WAZUH_ENDPOINT"
+	wazuhEndpointEnv      = "CASS_WAZUH_ENDPOINT"
 	wazuhUsernameEnv      = "WAZUH_API_USERNAME"
 	wazuhPasswordEnv      = "WAZUH_API_PASSWORD"
 	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated, as
 	// a comma-separated list. Site configuration, so it lives here rather than
 	// in the connector: at RTS it is "RTS_Ops,Viper".
-	wazuhCriticalGroupsEnv = "SROIAAA_WAZUH_CRITICAL_GROUPS"
-	pegasusDSNEnv          = "SROIAAA_PEGASUS_DSN"
-	pegasusMaxRowsEnv      = "SROIAAA_PEGASUS_MAX_ROWS"
-	pegasusMaxBytesEnv     = "SROIAAA_PEGASUS_MAX_BYTES"
-	auditPathEnv           = "SROIAAA_BROKER_AUDIT"
-	rtEndpointEnv          = "SROIAAA_RT_ENDPOINT"
+	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
+	pegasusDSNEnv          = "CASS_PEGASUS_DSN"
+	pegasusMaxRowsEnv      = "CASS_PEGASUS_MAX_ROWS"
+	pegasusMaxBytesEnv     = "CASS_PEGASUS_MAX_BYTES"
+	auditPathEnv           = "CASS_BROKER_AUDIT"
+	rtEndpointEnv          = "CASS_RT_ENDPOINT"
 	rtTokenEnv             = "RT_API_TOKEN"
-	cassAgentConfigEnv     = "SROIAAA_AGENT_CONFIG"
+	cassAgentConfigEnv     = "CASS_AGENT_CONFIG"
 	// rtQueuesEnv names the RT queues this deployment allows searching, as a
 	// comma-separated list. Site configuration, not a connector default: RT
 	// queues are organization-specific and there is no safe default that
 	// includes any of them.
-	rtQueuesEnv = "SROIAAA_RT_QUEUES"
+	rtQueuesEnv = "CASS_RT_QUEUES"
 
 	// defaultModel is chosen by scripts/eval_headtohead.py, which grades six
 	// question shapes rather than one: an aggregate, a grouped result that
@@ -74,17 +75,22 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	policyPath := flags.String("policy", "", "path to a broker policy JSON file")
 	model := flags.String("model", configuredModel(), "model or alias to ask")
-	endpoint := flags.String("mindrouter-endpoint", os.Getenv(mindrouterEndpointEnv), "MindRouter base URL")
-	zabbixEndpoint := flags.String("zabbix-endpoint", os.Getenv(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
-	wazuhEndpoint := flags.String("wazuh-endpoint", os.Getenv(wazuhEndpointEnv), "Wazuh API base URL")
+	endpoint := flags.String("mindrouter-endpoint", env.Get(mindrouterEndpointEnv), "MindRouter base URL")
+	zabbixEndpoint := flags.String("zabbix-endpoint", env.Get(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
+	wazuhEndpoint := flags.String("wazuh-endpoint", env.Get(wazuhEndpointEnv), "Wazuh API base URL")
 	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API")
-	rtEndpoint := flags.String("rt-endpoint", os.Getenv(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
+	rtEndpoint := flags.String("rt-endpoint", env.Get(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
 	showTrace := flags.Bool("trace", false, "print the policy decision trace to stderr")
-	auditPath := flags.String("audit", os.Getenv(auditPathEnv), "append a JSON-lines audit record for each question")
+	auditPath := flags.String("audit", env.Get(auditPathEnv), "append a JSON-lines audit record for each question")
 	timeout := flags.Duration("timeout", 180*time.Second, "overall timeout")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	// Said once, after the flags have pulled their defaults from the
+	// environment, so a run that still depends on the old variable names says
+	// so out loud. This is what makes the compatibility temporary rather than
+	// permanent: silence here is how a shim outlives the rename.
+	env.ReportLegacy(stderr)
 	// Two separate failures, because a message naming the wrong flag sends the
 	// operator to fix something that was never wrong.
 	if *policyPath == "" {
@@ -149,7 +155,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func configuredModel() string {
-	if model := os.Getenv(mindrouterModelEnv); model != "" {
+	if model := env.Get(mindrouterModelEnv); model != "" {
 		return model
 	}
 	return defaultModel
@@ -174,7 +180,7 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 	if endpoint == "" {
 		return nil, fmt.Errorf("set -mindrouter-endpoint or %s", mindrouterEndpointEnv)
 	}
-	apiKey := os.Getenv(mindrouterKeyEnv)
+	apiKey := env.Get(mindrouterKeyEnv)
 	if apiKey == "" {
 		return nil, fmt.Errorf("%s is not set (a value in ~/.bashrc must also be exported)", mindrouterKeyEnv)
 	}
@@ -199,10 +205,10 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 	// on 2026-09-02, chasing RT through a pull, a rebuild and a merge before
 	// anyone looked at the env file.
 	for _, half := range []struct{ endpoint, endpointEnv, credential, credentialEnv string }{
-		{zabbixEndpoint, zabbixEndpointEnv, os.Getenv(zabbixTokenEnv), zabbixTokenEnv},
-		{wazuhEndpoint, wazuhEndpointEnv, os.Getenv(wazuhUsernameEnv), wazuhUsernameEnv},
-		{wazuhEndpoint, wazuhEndpointEnv, os.Getenv(wazuhPasswordEnv), wazuhPasswordEnv},
-		{rtEndpoint, rtEndpointEnv, os.Getenv(rtTokenEnv), rtTokenEnv},
+		{zabbixEndpoint, zabbixEndpointEnv, env.Get(zabbixTokenEnv), zabbixTokenEnv},
+		{wazuhEndpoint, wazuhEndpointEnv, env.Get(wazuhUsernameEnv), wazuhUsernameEnv},
+		{wazuhEndpoint, wazuhEndpointEnv, env.Get(wazuhPasswordEnv), wazuhPasswordEnv},
+		{rtEndpoint, rtEndpointEnv, env.Get(rtTokenEnv), rtTokenEnv},
 	} {
 		if half.endpoint != "" && half.credential == "" {
 			return nil, fmt.Errorf("%s is set but %s is not; export it, or unset %s to disable that source deliberately",
@@ -213,52 +219,52 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 	// The queue allowlist is the third RT variable and the easiest to miss.
 	// The connector refuses an empty one, correctly, but it is a library and
 	// cannot name the variable that would fix it.
-	if rtEndpoint != "" && len(splitList(os.Getenv(rtQueuesEnv))) == 0 {
+	if rtEndpoint != "" && len(splitList(env.Get(rtQueuesEnv))) == 0 {
 		return nil, fmt.Errorf("%s is set but %s is not; there is no safe default queue set, "+
 			"so RT is refused rather than searched in full", rtEndpointEnv, rtQueuesEnv)
 	}
-	if zabbixEndpoint != "" && os.Getenv(zabbixTokenEnv) != "" {
+	if zabbixEndpoint != "" && env.Get(zabbixTokenEnv) != "" {
 		zabbix, err := connector.NewZabbixConnector(connector.ZabbixConfig{
 			Endpoint: zabbixEndpoint,
-			Token:    os.Getenv(zabbixTokenEnv),
+			Token:    env.Get(zabbixTokenEnv),
 		})
 		if err != nil {
 			return nil, err
 		}
 		connectors = append(connectors, zabbix)
 	}
-	if wazuhEndpoint != "" && os.Getenv(wazuhUsernameEnv) != "" && os.Getenv(wazuhPasswordEnv) != "" {
+	if wazuhEndpoint != "" && env.Get(wazuhUsernameEnv) != "" && env.Get(wazuhPasswordEnv) != "" {
 		wazuh, err := connector.NewWazuhConnector(connector.WazuhConfig{
 			Endpoint:           wazuhEndpoint,
-			Username:           os.Getenv(wazuhUsernameEnv),
-			Password:           os.Getenv(wazuhPasswordEnv),
+			Username:           env.Get(wazuhUsernameEnv),
+			Password:           env.Get(wazuhPasswordEnv),
 			InsecureSkipVerify: wazuhInsecure,
-			CriticalGroups:     splitList(os.Getenv(wazuhCriticalGroupsEnv)),
+			CriticalGroups:     splitList(env.Get(wazuhCriticalGroupsEnv)),
 		})
 		if err != nil {
 			return nil, err
 		}
 		connectors = append(connectors, wazuh)
 	}
-	if dsn := os.Getenv(pegasusDSNEnv); dsn != "" {
+	if dsn := env.Get(pegasusDSNEnv); dsn != "" {
 		pegasus, err := connector.NewPegasusConnector(connector.PegasusConfig{DSN: dsn, MaxRows: pegasusMaxRows(), MaxBytes: pegasusMaxBytes()})
 		if err != nil {
 			return nil, err
 		}
 		connectors = append(connectors, pegasus)
 	}
-	if rtEndpoint != "" && os.Getenv(rtTokenEnv) != "" {
+	if rtEndpoint != "" && env.Get(rtTokenEnv) != "" {
 		rt, err := connector.NewRTConnector(connector.RTConfig{
 			Endpoint: rtEndpoint,
-			Token:    os.Getenv(rtTokenEnv),
-			Queues:   splitList(os.Getenv(rtQueuesEnv)),
+			Token:    env.Get(rtTokenEnv),
+			Queues:   splitList(env.Get(rtQueuesEnv)),
 		})
 		if err != nil {
 			return nil, err
 		}
 		connectors = append(connectors, rt)
 	}
-	if rawAgents := os.Getenv(cassAgentConfigEnv); rawAgents != "" {
+	if rawAgents := env.Get(cassAgentConfigEnv); rawAgents != "" {
 		agents, err := connector.ParseCassAgents(rawAgents)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", cassAgentConfigEnv, err)
@@ -294,7 +300,7 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 // pegasusMaxRows reads the row cap override, falling back to the connector's
 // default when unset or unparseable.
 func pegasusMaxRows() int {
-	value := os.Getenv(pegasusMaxRowsEnv)
+	value := env.Get(pegasusMaxRowsEnv)
 	if value == "" {
 		return 0
 	}
@@ -309,7 +315,7 @@ func pegasusMaxRows() int {
 // connector default when unset. Raise it only alongside a model whose context
 // window can hold the result.
 func pegasusMaxBytes() int {
-	value := os.Getenv(pegasusMaxBytesEnv)
+	value := env.Get(pegasusMaxBytesEnv)
 	if value == "" {
 		return 0
 	}
@@ -345,13 +351,13 @@ func unconfiguredSources(zabbixEndpoint, wazuhEndpoint, rtEndpoint string) []str
 	if wazuhEndpoint == "" {
 		off = append(off, "Wazuh fleet (set "+wazuhEndpointEnv+", "+wazuhUsernameEnv+", "+wazuhPasswordEnv+")")
 	}
-	if os.Getenv(pegasusDSNEnv) == "" {
+	if env.Get(pegasusDSNEnv) == "" {
 		off = append(off, "PegasusDB accounting (set "+pegasusDSNEnv+")")
 	}
 	if rtEndpoint == "" {
 		off = append(off, "Request Tracker tickets (set "+rtEndpointEnv+", "+rtTokenEnv+", "+rtQueuesEnv+")")
 	}
-	if os.Getenv(cassAgentConfigEnv) == "" {
+	if env.Get(cassAgentConfigEnv) == "" {
 		off = append(off, "endpoint evidence (set "+cassAgentConfigEnv+")")
 	}
 	return off

@@ -22,18 +22,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/env"
 )
 
 const (
-	rtLiveEndpointEnv = "SROIAAA_RT_ENDPOINT"
+	rtLiveEndpointEnv = "CASS_RT_ENDPOINT"
 	rtLiveTokenEnv    = "RT_API_TOKEN"
-	rtLiveQueuesEnv   = "SROIAAA_RT_QUEUES"
+	rtLiveQueuesEnv   = "CASS_RT_QUEUES"
 
 	// rtLiveAgeDays is the bound these tests reason about. Ticket age is
 	// stable in a way "open right now" is not: a ticket 61 days old stays 61
@@ -47,12 +47,12 @@ const (
 // how a suite comes to prove nothing.
 func rtLiveConnector(t *testing.T) (*RTConnector, []string) {
 	t.Helper()
-	endpoint, token := os.Getenv(rtLiveEndpointEnv), os.Getenv(rtLiveTokenEnv)
-	queues := splitLive(os.Getenv(rtLiveQueuesEnv))
+	endpoint, token := env.Get(rtLiveEndpointEnv), env.Get(rtLiveTokenEnv)
+	queues := splitLive(env.Get(rtLiveQueuesEnv))
 	for name, value := range map[string]string{
 		rtLiveEndpointEnv: endpoint,
 		rtLiveTokenEnv:    token,
-		rtLiveQueuesEnv:   os.Getenv(rtLiveQueuesEnv),
+		rtLiveQueuesEnv:   env.Get(rtLiveQueuesEnv),
 	} {
 		if strings.TrimSpace(value) == "" {
 			t.Fatalf("%s is not set (and must be exported); these tests reach live RT by design", name)
@@ -392,7 +392,7 @@ func TestRTLiveMatchesRTsOwnCount(t *testing.T) {
 // rtLiveDirectCount asks RT the same question over HTTP without going through
 // the connector, reading the envelope's own total rather than counting rows.
 func rtLiveDirectCount(ctx context.Context, queues []string, since, until string) (int, error) {
-	endpoint := strings.TrimRight(os.Getenv(rtLiveEndpointEnv), "/")
+	endpoint := strings.TrimRight(env.Get(rtLiveEndpointEnv), "/")
 	parts := []string{"(Status = 'new' OR Status = 'open' OR Status = 'stalled')"}
 	queueParts := make([]string, 0, len(queues))
 	for _, queue := range queues {
@@ -421,7 +421,7 @@ func rtLiveDirectCount(ctx context.Context, queues []string, since, until string
 	if err != nil {
 		return 0, err
 	}
-	request.Header.Set("Authorization", "token "+os.Getenv(rtLiveTokenEnv))
+	request.Header.Set("Authorization", "token "+env.Get(rtLiveTokenEnv))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
