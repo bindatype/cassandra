@@ -1,0 +1,86 @@
+[Unit]
+Description=Cassandra endpoint agent: read-only host evidence over loopback
+Documentation=https://github.com/bindatype/cassandra
+After=network.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/cassd
+
+# The bearer token lives in a root-owned 0600 file, never in this unit.
+# `systemctl cat` and `systemd-analyze dump` print unit contents to anyone who
+# asks, so Environment=TOKEN=... publishes the credential to every local user.
+# That exact shape was recorded as a High finding against the sidecar in the
+# August review; this is the same mistake and it is not repeated here.
+EnvironmentFile=/etc/cassd/cassd.env
+
+# An identity that exists only while the service runs, owns nothing outside its
+# state directory, and belongs to no group. It therefore reads exactly what is
+# world-readable and nothing else: on this host /var/log is 0755 so it can be
+# listed and stat-ed, while /var/log/messages and /var/log/secure are 0600
+# root:root and stay unreadable. That is the intended outcome. Reading those
+# would be a deliberate privilege grant -- a SupplementaryGroups= line or a
+# permission change -- and should be argued for on its own, not inherited.
+DynamicUser=yes
+
+# The audit log, and the only writable path in the entire filesystem.
+StateDirectory=cassd
+StateDirectoryMode=0700
+
+# --- What it may see ---------------------------------------------------
+# The whole hierarchy read-only, the evidence roots included. The daemon has no
+# write path outside its audit log, so this costs nothing and turns "we checked
+# that the code never writes" into something the kernel enforces.
+ProtectSystem=strict
+ProtectHome=yes
+
+# /tmp is an allowed root, so it must be the host's rather than a private empty
+# one. This is the single hardening directive traded away for a configuration
+# choice, and it is a real trade: with PrivateTmp=yes the daemon answers
+# "list /tmp" with an empty listing and no error, which is worse than refusing.
+# Drop /tmp from CASS_ALLOWED_ROOTS and set PrivateTmp=yes to take it back.
+PrivateTmp=no
+
+# /proc is hidden except this service's own pids. process.list is not among the
+# enabled operations; enabling it means relaxing these two, which is again a
+# decision to make deliberately rather than to find already made.
+ProtectProc=invisible
+ProcSubset=pid
+
+# --- What it may do ----------------------------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+UMask=0077
+
+# The broker runs on this host, so nothing off-box should ever reach it. The
+# bind address is loopback as well; this is the second lock on the same door,
+# and it is the one a misconfigured CASS_BIND_ADDR cannot undo.
+RestrictAddressFamilies=AF_INET AF_INET6
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+# @mount is denied, so this cannot mount anything even if a future change tries
+# to -- which is a stronger guarantee than mounting things read-only itself.
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @reboot @swap @obsolete
+SystemCallErrorNumber=EPERM
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -188,6 +188,24 @@ else
 	bad "the old name survives outside the compatibility shims" "$(printf '%s' "$oldname" | head -8)"
 fi
 
+# The unit file is the only part of this project that nothing compiles and no
+# test exercises. A typo in it surfaces as a service that will not start on a
+# host somebody is already waiting on, so it is at least parsed here.
+#
+# Skipped where systemd is absent, which includes every macOS checkout -- a
+# check that cannot run must say so rather than quietly passing.
+if [ -f deploy/cassd.service ]; then
+	if ! command -v systemd-analyze >/dev/null 2>&1; then
+		ok "cassd unit (skipped: no systemd on this host)"
+	elif systemd-analyze verify deploy/cassd.service 2>&1 |
+		grep -v "is not executable" | grep -q .; then
+		bad "cassd unit does not parse" \
+			"$(systemd-analyze verify deploy/cassd.service 2>&1 | grep -v "is not executable" | head -3)"
+	else
+		ok "cassd unit parses"
+	fi
+fi
+
 # The grader decides what every RT shape result means, and nothing in a run
 # notices when a grader is wrong: the numbers come out and look like results.
 if python3 ./scripts/eval_rt_shape.py --self-test >/dev/null 2>&1; then
