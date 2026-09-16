@@ -64,10 +64,10 @@ required="CASS_MINDROUTER_ENDPOINT MINDROUTER_API_KEY CASS_WAZUH_CRITICAL_GROUPS
 [ "$DRY" -eq 1 ] || required="$required CASS_ZOOM_WEBHOOK_URL"
 missing=
 for var in $required; do
-	eval "value=\${$var:-}"
+	value=$(cass_value "$var")
 	[ -n "$value" ] || missing="$missing $var"
 done
-if [ "$DRY" -eq 0 ] && [ -z "${CASS_ZOOM_WEBHOOK_SECRET:-}${CASS_ZOOM_WEBHOOK_TOKEN:-}" ]; then
+if [ "$DRY" -eq 0 ] && [ -z "$(cass_value CASS_ZOOM_WEBHOOK_SECRET)$(cass_value CASS_ZOOM_WEBHOOK_TOKEN)" ]; then
 	missing="$missing CASS_ZOOM_WEBHOOK_SECRET"
 fi
 if [ -n "$missing" ]; then

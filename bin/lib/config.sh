@@ -71,3 +71,21 @@ cass_warn_legacy() {
 	_cass_warned="${_cass_warned:-} $1"
 	echo "warning: using $1; rename it to $2" >&2
 }
+
+# cass_value NAME -- the value of a CASS_ variable, falling back to its
+# SROIAAA_ spelling and saying so.
+#
+# This exists because a shell precheck that only knows the new names refuses
+# before the Go program -- which does know both -- ever runs. zoom-digest.sh
+# had exactly that defect for the length of one commit: its required-variable
+# list was renamed, the fallback was not, and the 04:45 job would have exited 2
+# with "not set in this environment" against an environment that was fine.
+cass_value() {
+	eval "_v=\${$1:-}"
+	if [ -z "$_v" ]; then
+		_legacy="SROIAAA_${1#CASS_}"
+		eval "_v=\${$_legacy:-}"
+		[ -z "$_v" ] || cass_warn_legacy "$_legacy" "$1"
+	fi
+	printf '%s' "$_v"
+}

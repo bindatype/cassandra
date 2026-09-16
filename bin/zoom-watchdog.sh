@@ -124,8 +124,8 @@ echo "zoom-watchdog: $alarm" >&2
 # Then try the channel. Best effort: a failure here is itself informative and
 # must not mask the stderr report above, so it is not fatal.
 BIN=${CASS_BIN:-"$ROOT/runtime"}
-if [ -n "${CASS_ZOOM_WEBHOOK_URL:-}" ] &&
-	[ -n "${CASS_ZOOM_WEBHOOK_SECRET:-}${CASS_ZOOM_WEBHOOK_TOKEN:-}" ]; then
+if [ -n "$(cass_value CASS_ZOOM_WEBHOOK_URL)" ] &&
+	[ -n "$(cass_value CASS_ZOOM_WEBHOOK_SECRET)$(cass_value CASS_ZOOM_WEBHOOK_TOKEN)" ]; then
 	# cd into the module: go resolves go.mod from the working directory, not
 	# from the package path. See the same subshell in bin/zoom-digest.sh.
 	if mkdir -p "$BIN" 2>/dev/null && (cd "$ROOT" && go build -o "$BIN/cass-notify" ./cmd/cass-notify) 2>/dev/null; then
