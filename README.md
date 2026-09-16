@@ -366,12 +366,26 @@ evidence is enabled by `CASS_AGENT_CONFIG`, a host-to-agent map held in the
 operator environment, never in a route plan. Each host has its own endpoint
 and bearer token, and remote agents must use HTTPS:
 
-**No endpoint agent is deployed in this environment yet.** The connector is
-written and tested, and `cmd/cassd` has existed since Phase One, but
-nothing is running it as a service: there is no systemd unit and no host in
-`CASS_AGENT_CONFIG`. Until one exists, `live.evidence` is planned and
-authorized by the broker and withheld from the model, exactly as it was before
-the connector was written. Deferred deliberately, not abandoned.
+**One endpoint agent is deployed**, on sgtstubby, as of 2026-09-16. It is a
+systemd service bound to loopback, running under a `DynamicUser` with the
+filesystem read-only in its own mount namespace and `@mount` denied outright.
+It enables three operations -- `capabilities.describe`, `filesystem.list` and
+`filesystem.stat` -- over two roots, `/var/log` and `/tmp`. `live.evidence`
+answers. The unit, the environment template and the install runbook are in
+`deploy/`.
+
+Two things that deployment does not change. The agent enforces
+`CASS_ALLOWED_ROOTS` and its enabled-operation list; it does **not** know the
+broker's resource aliases, which exist only broker-side. So the policy bounds
+what Cassandra issues, not what a token holder can ask for -- anyone with the
+bearer token can call the agent directly for any enabled operation on any path
+under the allowed roots. The roots are the real boundary, which is why they are
+narrow.
+
+And an agent that is *configured* is offered to the model whether or not it is
+*running*: intents are derived from the connectors the executor can reach, not
+from their health. A stopped agent produces an execution failure that returns
+to the model as a correctable tool error and spends one of its turns.
 
 ```bash
 export CASS_AGENT_CONFIG='{
