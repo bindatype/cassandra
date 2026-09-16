@@ -53,13 +53,13 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictSUIDSGID=yes
 PrivateDevices=yes
-# PrivateDevices alone still leaves the standard node set reachable, which
-# systemd-analyze reports as char-rtc:r. Nothing here reads a clock device.
-# The Go runtime's needs -- /dev/null, /dev/urandom, /dev/zero -- come from
-# DevicePolicy=closed, so this narrows the set without removing those; if the
-# service fails to start after a change here, that assumption is where to look.
-DevicePolicy=closed
-DeviceAllow=
+# systemd-analyze still reports char-rtc:r here and it is left alone
+# deliberately. DevicePolicy=closed with an empty DeviceAllow= was tried and
+# changed nothing: closed is itself what grants the standard device set, so
+# clearing the extra allows leaves rtc exactly where it was. Removing it needs
+# DevicePolicy=strict with an explicit list, and strict with an empty list
+# denies /dev/urandom, which stops the Go runtime before main(). That is real
+# breakage for 0.1 of an advisory score, so the score keeps the point.
 ProtectClock=yes
 # Immutable, not unreadable: host.info can still report the hostname if it is
 # ever enabled. This only stops the service changing it.
