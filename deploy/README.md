@@ -23,25 +23,34 @@ than arriving as a side effect of a deployment.
 
 ## Install
 
-Root is required for steps 2 through 5.
+Two phases, because they run as different users. Build as yourself; install as
+root.
+
+Every path below is absolute, and deliberately so. The first version of this
+runbook opened with `cd ~/dev/cassandra`, which is correct for the person who
+has the checkout and wrong for root, whose `~` is `/root` -- pasted as one
+block by a root shell it produced six consecutive "No such file or directory"
+errors and installed nothing. A runbook that changes user halfway cannot use
+`~` or relative paths anywhere.
 
 ```sh
-# 1. Build (any user, from a checkout)
-cd ~/dev/cassandra && make build-linux-amd64
+# 1. Build, as the user who owns the checkout.
+#    Building as root would leave root-owned files in dist/ and break the
+#    owner's next make.
+cd /home/glenamac/dev/cassandra && make build-linux-amd64
+sha256sum dist/cassd-linux-amd64        # note this; check it after installing
+```
 
-# 2. Place the binary
-install -o root -g root -m 0755 dist/cassd-linux-amd64 /usr/local/bin/cassd
+```sh
+# 2-5, as root. CASS is the checkout, not root's home.
+CASS=/home/glenamac/dev/cassandra
 
-# 3. Configuration, including the bearer token
+install -o root -g root -m 0755 "$CASS/dist/cassd-linux-amd64" /usr/local/bin/cassd
 mkdir -p /etc/cassd
-install -o root -g root -m 0600 deploy/cassd.env.example /etc/cassd/cassd.env
+install -o root -g root -m 0600 "$CASS/deploy/cassd.env.example" /etc/cassd/cassd.env
 sed -i "s|^CASS_AUTH_TOKEN=.*|CASS_AUTH_TOKEN=$(openssl rand -hex 32)|" /etc/cassd/cassd.env
-
-# 4. The unit
-install -o root -g root -m 0644 deploy/cassd.service /etc/systemd/system/cassd.service
+install -o root -g root -m 0644 "$CASS/deploy/cassd.service" /etc/systemd/system/cassd.service
 systemctl daemon-reload
-
-# 5. Start
 systemctl enable --now cassd
 systemctl status cassd --no-pager
 ```
