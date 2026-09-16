@@ -53,7 +53,17 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictSUIDSGID=yes
 PrivateDevices=yes
+# PrivateDevices alone still leaves the standard node set reachable, which
+# systemd-analyze reports as char-rtc:r. Nothing here reads a clock device.
+# The Go runtime's needs -- /dev/null, /dev/urandom, /dev/zero -- come from
+# DevicePolicy=closed, so this narrows the set without removing those; if the
+# service fails to start after a change here, that assumption is where to look.
+DevicePolicy=closed
+DeviceAllow=
 ProtectClock=yes
+# Immutable, not unreadable: host.info can still report the hostname if it is
+# ever enabled. This only stops the service changing it.
+ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -76,7 +86,7 @@ IPAddressDeny=any
 # to -- which is a stronger guarantee than mounting things read-only itself.
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @mount @reboot @swap @obsolete
+SystemCallFilter=~@privileged @mount @reboot @swap @obsolete @resources
 SystemCallErrorNumber=EPERM
 
 Restart=on-failure
