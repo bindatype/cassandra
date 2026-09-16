@@ -11,7 +11,7 @@
   "resources": {
     "system-log": {
       "operation": "filesystem.tail",
-      "path": "/var/log/sroiaaa/system.log",
+      "path": "/var/log/cass/system.log",
       "params": {
         "max_bytes": 8192
       }

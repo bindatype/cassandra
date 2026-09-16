@@ -43,7 +43,7 @@ partners working closely, collaborator access and shared branches is
 simpler than forks and avoids a round trip on every change.
 
 ```bash
-git clone https://github.com/bindatype/Cassandra.git
+git clone https://github.com/bindatype/cassandra.git
 cd Cassandra
 go test ./...
 ```

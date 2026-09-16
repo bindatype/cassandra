@@ -1,13 +1,13 @@
 #!/bin/sh
 # Notice when the morning digest has stopped posting.
 #
-#   . ~/.config/sroiaaa/env
+#   . ~/.config/cass/env
 #   sh bin/zoom-watchdog.sh          # silent if the digest is current
 #   sh bin/zoom-watchdog.sh -v       # say what it found either way
 #
 # From cron, at least 2h15m after the digest -- see MAX_AGE_HOURS below, the
 # gap is load-bearing and 06:30 is too early to catch a same-day failure:
-#   0 8 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/Cass/bin/zoom-watchdog.sh
+#   0 8 * * * . $HOME/.config/cass/env && sh $HOME/dev/cassandra/bin/zoom-watchdog.sh
 #:usage-end
 #
 # WHY THIS EXISTS
@@ -52,7 +52,10 @@ esac
 # in. A hint that hardcodes a path is how the original cron line went stale.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-RECEIPT=${SROIAAA_DIGEST_RECEIPT:-"$HOME/.local/state/sroiaaa/zoom-digest.receipt"}
+# shellcheck source=bin/lib/config.sh
+. "$ROOT/bin/lib/config.sh"
+
+RECEIPT=${CASS_DIGEST_RECEIPT:-${CASS_DIGEST_RECEIPT:-$(cass_state_path zoom-digest.receipt)}}
 
 # 26 hours, not 24: a daily job must be allowed to be an hour late without
 # crying wolf, and an alarm that fires on ordinary jitter gets muted, which
@@ -70,7 +73,7 @@ RECEIPT=${SROIAAA_DIGEST_RECEIPT:-"$HOME/.local/state/sroiaaa/zoom-digest.receip
 #
 # So moving the cron entry earlier, or raising this threshold, silently costs a
 # day of detection. Move them together or not at all.
-MAX_AGE_HOURS=${SROIAAA_DIGEST_MAX_AGE_HOURS:-26}
+MAX_AGE_HOURS=${CASS_DIGEST_MAX_AGE_HOURS:-26}
 
 now=$(date +%s)
 
@@ -120,9 +123,9 @@ echo "zoom-watchdog: $alarm" >&2
 
 # Then try the channel. Best effort: a failure here is itself informative and
 # must not mask the stderr report above, so it is not fatal.
-BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
-if [ -n "${SROIAAA_ZOOM_WEBHOOK_URL:-}" ] &&
-	[ -n "${SROIAAA_ZOOM_WEBHOOK_SECRET:-}${SROIAAA_ZOOM_WEBHOOK_TOKEN:-}" ]; then
+BIN=${CASS_BIN:-"$ROOT/runtime"}
+if [ -n "${CASS_ZOOM_WEBHOOK_URL:-}" ] &&
+	[ -n "${CASS_ZOOM_WEBHOOK_SECRET:-}${CASS_ZOOM_WEBHOOK_TOKEN:-}" ]; then
 	# cd into the module: go resolves go.mod from the working directory, not
 	# from the package path. See the same subshell in bin/zoom-digest.sh.
 	if mkdir -p "$BIN" 2>/dev/null && (cd "$ROOT" && go build -o "$BIN/cass-notify" ./cmd/cass-notify) 2>/dev/null; then

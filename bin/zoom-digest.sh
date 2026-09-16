@@ -1,13 +1,13 @@
 #!/bin/sh
 # Post a morning digest into a Zoom Team Chat channel.
 #
-#   . ~/.config/sroiaaa/env
+#   . ~/.config/cass/env
 #   sh bin/zoom-digest.sh            # ask, and post to Zoom
 #   sh bin/zoom-digest.sh -n         # ask, print here, post nothing
 #   sh bin/zoom-digest.sh -n Wazuh   # just that one section
 #
 # From cron, source the environment first; cron gets almost none of it:
-#   45 4 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/Cass/bin/zoom-digest.sh
+#   45 4 * * * . $HOME/.config/cass/env && sh $HOME/dev/cassandra/bin/zoom-digest.sh
 #:usage-end
 #
 # Give cron the FULL path to this script rather than `cd`-ing to the repo and
@@ -18,7 +18,7 @@
 # command that never ran. Pair it with bin/zoom-watchdog.sh, which notices.
 #
 # The signature construction Zoom accepts was confirmed on 2026-08-30 and is
-# the built-in default, so SROIAAA_ZOOM_SIGNATURE_VARIANT need not be set. If
+# the built-in default, so CASS_ZOOM_SIGNATURE_VARIANT need not be set. If
 # posting starts returning 401, run  cass-notify -probe  before assuming
 # the secret is wrong.
 #
@@ -26,6 +26,9 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# shellcheck source=bin/lib/config.sh
+. "$ROOT/bin/lib/config.sh"
 
 DRY=0
 case ${1:-} in
@@ -46,7 +49,7 @@ ONLY=${1:-}
 # from cass-notify at the end of a pipeline, after a question has already
 # been answered, and reads as a Zoom problem rather than a missing source.
 #
-# ~/.config/sroiaaa/env is sourced explicitly and not from ~/.bashrc, so a
+# ~/.config/cass/env is sourced explicitly and not from ~/.bashrc, so a
 # fresh shell has none of these. That is the usual cause.
 #
 # It matters most under cron, which sources neither. A credential whose value
@@ -54,28 +57,28 @@ ONLY=${1:-}
 # one fails in a way that reads like a broken source rather than a missing
 # secret. Every variable the digest needs is listed here so that failure is
 # loud and names itself.
-required="SROIAAA_MINDROUTER_ENDPOINT MINDROUTER_API_KEY SROIAAA_WAZUH_CRITICAL_GROUPS
-	ZABBIX_RO_TOKEN SROIAAA_ZABBIX_ENDPOINT
-	WAZUH_API_USERNAME WAZUH_API_PASSWORD SROIAAA_WAZUH_ENDPOINT
-	SROIAAA_PEGASUS_DSN"
-[ "$DRY" -eq 1 ] || required="$required SROIAAA_ZOOM_WEBHOOK_URL"
+required="CASS_MINDROUTER_ENDPOINT MINDROUTER_API_KEY CASS_WAZUH_CRITICAL_GROUPS
+	ZABBIX_RO_TOKEN CASS_ZABBIX_ENDPOINT
+	WAZUH_API_USERNAME WAZUH_API_PASSWORD CASS_WAZUH_ENDPOINT
+	CASS_PEGASUS_DSN"
+[ "$DRY" -eq 1 ] || required="$required CASS_ZOOM_WEBHOOK_URL"
 missing=
 for var in $required; do
 	eval "value=\${$var:-}"
 	[ -n "$value" ] || missing="$missing $var"
 done
-if [ "$DRY" -eq 0 ] && [ -z "${SROIAAA_ZOOM_WEBHOOK_SECRET:-}${SROIAAA_ZOOM_WEBHOOK_TOKEN:-}" ]; then
-	missing="$missing SROIAAA_ZOOM_WEBHOOK_SECRET"
+if [ "$DRY" -eq 0 ] && [ -z "${CASS_ZOOM_WEBHOOK_SECRET:-}${CASS_ZOOM_WEBHOOK_TOKEN:-}" ]; then
+	missing="$missing CASS_ZOOM_WEBHOOK_SECRET"
 fi
 if [ -n "$missing" ]; then
 	echo "zoom-digest: not set in this environment:$missing" >&2
-	echo "zoom-digest: run  . ~/.config/sroiaaa/env  first" >&2
+	echo "zoom-digest: run  . ~/.config/cass/env  first" >&2
 	echo "zoom-digest: (a variable set in ~/.bashrc without export is invisible here)" >&2
 	exit 2
 fi
 
-POLICY=${SROIAAA_POLICY:-"$ROOT/configs/broker-policy.example.json"}
-BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
+POLICY=${CASS_POLICY:-"$ROOT/configs/broker-policy.example.json"}
+BIN=${CASS_BIN:-"$ROOT/runtime"}
 
 # The receipt records that a real post happened, and is what bin/zoom-watchdog.sh
 # reads to decide the digest has gone quiet.
@@ -84,7 +87,7 @@ BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
 # the evidence-that-it-ran to the very directory whose disappearance is the
 # thing most likely to stop it running -- the receipt would vanish along with
 # the digest, and a watchdog cannot tell "never ran" from "never installed".
-RECEIPT=${SROIAAA_DIGEST_RECEIPT:-"$HOME/.local/state/sroiaaa/zoom-digest.receipt"}
+RECEIPT=${CASS_DIGEST_RECEIPT:-${CASS_DIGEST_RECEIPT:-$(cass_state_path zoom-digest.receipt)}}
 
 mkdir -p "$BIN"
 # The build must run INSIDE the module. Naming the package by absolute path is
@@ -160,7 +163,7 @@ else
 fi
 
 digest "Zabbix overnight" "what problems started since yesterday, and how many are there by severity?"
-# Critical groups are set by SROIAAA_WAZUH_CRITICAL_GROUPS and marked in the
+# Critical groups are set by CASS_WAZUH_CRITICAL_GROUPS and marked in the
 # evidence before the model sees it, so this asks for a report rather than a
 # calculation.
 digest "Wazuh agents" "how many agents are disconnected right now, and are any of them in a critical group? Name the critical ones."

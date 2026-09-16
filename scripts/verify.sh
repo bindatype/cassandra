@@ -156,6 +156,31 @@ else
 	bad "a credential or webhook endpoint is in tracked files" "$badsecret"
 fi
 
+# The rename from SROIAAA to Cassandra leaves two deliberate survivors: the
+# SROIAAA_ variable names, still read so an unmigrated host keeps working, and
+# ~/.config/sroiaaa, still searched for the same reason. Everything else should
+# be gone, and a half-finished rename is worse than either name -- it is the
+# state where a script looks right and points somewhere that does not exist.
+#
+# This fails on any OTHER spelling of the old name, so the compatibility shims
+# stay visible and deliberate while typos and leftovers do not.
+#
+# The three files that implement the compatibility are exempted by name rather
+# than by pattern. They are where the old name belongs, and a pattern loose
+# enough to spare their prose would spare a genuine leftover somewhere else.
+# Naming them also means deleting them finishes the rename: the exemption list
+# goes empty and this check covers the whole tree.
+oldname=$(git ls-files -z 2>/dev/null |
+	xargs -0 grep -inE "sroiaaa" 2>/dev/null |
+	grep -viE "SROIAAA_([A-Z_]+|\\\$\\{)|\.config/sroiaaa|\.local/(state|share)/sroiaaa|sroiaaa/(env|policy)" |
+	grep -vE "^(scripts/verify\.sh|internal/env/env(_test)?\.go|bin/lib/config\.sh):" |
+	cut -d: -f1,2 || true)
+if [ -z "$oldname" ]; then
+	ok "no stray SROIAAA references (compatibility shims excepted)"
+else
+	bad "the old name survives outside the compatibility shims" "$(printf '%s' "$oldname" | head -8)"
+fi
+
 # The grader decides what every RT shape result means, and nothing in a run
 # notices when a grader is wrong: the numbers come out and look like results.
 if python3 ./scripts/eval_rt_shape.py --self-test >/dev/null 2>&1; then

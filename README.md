@@ -61,7 +61,7 @@ testdata/varlog/           sample log files mounted into the container
 ## Quick start
 
 ```bash
-git clone https://github.com/bindatype/Cassandra.git
+git clone https://github.com/bindatype/cassandra.git
 cd Cassandra
 export SROIAAA_AUTH_TOKEN="${SROIAAA_AUTH_TOKEN:-dev-cass-token}"
 ```
@@ -204,7 +204,7 @@ curl -fsS -X POST http://127.0.0.1:18080/v1/operations \
   -H 'content-type: application/json' \
   -d '{
     "operation": "filesystem.tail",
-    "target": {"path": "/var/log/sroiaaa/system.log"},
+    "target": {"path": "/var/log/cass/system.log"},
     "params": {"max_bytes": 2048}
   }' | jq .
 ```

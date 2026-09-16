@@ -1,8 +1,8 @@
 #!/bin/bash
 # Ask Cass a question.
 #
-#   ask "how many agents are disconnected right now?"
-#   ask -model llama3.3:latest "what is broken on dss01?"
+#   askcass "how many agents are disconnected right now?"
+#   askcass -model llama3.3:latest "what is broken on dss01?"
 #
 # This existed for a while as a hand-written file in one person's ~/bin and
 # nowhere else, so the second contributor to join the project did not have it
@@ -26,35 +26,45 @@ while [ -L "$target" ]; do
 done
 ROOT=$(cd "$(dirname "$target")/.." && pwd)
 
-ENV_FILE=${SROIAAA_ENV:-$HOME/.config/sroiaaa/env}
+# shellcheck source=bin/lib/config.sh
+. "$ROOT/bin/lib/config.sh"
+
+ENV_FILE=$(cass_config_path env CASS_ENV)
 if [ -r "$ENV_FILE" ]; then
 	# shellcheck disable=SC1090
 	. "$ENV_FILE"
 else
-	echo "ask: no environment file at $ENV_FILE" >&2
-	echo "ask: see docs/onboarding.md, section 2" >&2
+	echo "askcass: no environment file at $ENV_FILE" >&2
+	echo "askcass: see docs/onboarding.md, section 2" >&2
 	exit 2
 fi
 
+# Either spelling satisfies the check. Naming only the new one would tell a
+# contributor whose env file predates the rename that a variable they have set
+# is missing, which sends them to fix something that is not broken.
 missing=""
-for name in SROIAAA_MINDROUTER_ENDPOINT MINDROUTER_API_KEY; do
+for name in CASS_MINDROUTER_ENDPOINT MINDROUTER_API_KEY; do
 	eval "value=\${$name:-}"
+	if [ -z "$value" ]; then
+		eval "value=\${SROIAAA_${name#CASS_}:-}"
+		[ -z "$value" ] || cass_warn_legacy "SROIAAA_${name#CASS_}" "$name"
+	fi
 	[ -n "$value" ] || missing="$missing $name"
 done
 if [ -n "$missing" ]; then
-	echo "ask: missing from the environment:$missing" >&2
-	echo "ask: every line in $ENV_FILE needs 'export'; a variable that is only set" >&2
-	echo "ask: is not inherited by the program you are running" >&2
+	echo "askcass: missing from the environment:$missing" >&2
+	echo "askcass: every line in $ENV_FILE needs 'export'; a variable that is only set" >&2
+	echo "askcass: is not inherited by the program you are running" >&2
 	exit 2
 fi
 
 # A personal policy overrides the repository's, but the repository's is a real
 # default rather than a placeholder -- the two were byte-identical on the one
 # host where a personal copy existed, so requiring one was ceremony.
-POLICY=${SROIAAA_POLICY:-$HOME/.config/sroiaaa/policy.json}
+POLICY=$(cass_config_path policy.json CASS_POLICY)
 [ -r "$POLICY" ] || POLICY=$ROOT/configs/broker-policy.example.json
 
-BIN=${SROIAAA_BIN:-$ROOT/runtime}
+BIN=${CASS_BIN:-${SROIAAA_BIN:-$ROOT/runtime}}
 mkdir -p "$BIN"
 # The build must run inside the module. Naming the package by absolute path is
 # not enough: go resolves go.mod from the working directory, and this script is

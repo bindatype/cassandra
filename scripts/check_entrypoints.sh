@@ -3,7 +3,7 @@
 #
 # `go test ./...` covers the packages and now the commands, but the first thing
 # a new contributor touches is none of those: it is `make install` and then
-# typing `ask`. That path has broken twice -- a dangling symlink after bin/ask
+# typing `askcass`. That path has broken twice -- a dangling symlink after bin/askcass
 # moved, and a `make uninstall` recipe with an unterminated quote that removed
 # the file and then failed -- and neither showed up in any test.
 #
@@ -42,10 +42,10 @@ parses() {
 	fi
 }
 
-# Run ask with a scrubbed environment.
+# Run askcass with a scrubbed environment.
 #
-# These checks assert that ask reports what is missing. A caller who has
-# sourced ~/.config/sroiaaa/env already has those variables exported, so ask
+# These checks assert that askcass reports what is missing. A caller who has
+# sourced ~/.config/cass/env already has those variables exported, so askcass
 # finds them and reports nothing, and the check fails -- not because the
 # behaviour is wrong but because the probe was measuring the caller's shell.
 # The result flipped on whether an operator had run `source` first: red for
@@ -55,7 +55,7 @@ parses() {
 # env -i keeps only what the build needs, so the probe answers the same
 # question wherever it runs.
 says() {
-	env -i PATH="$PATH" HOME="$HOME" SROIAAA_ENV="$1" "$PREFIX/ask" test 2>&1 | grep -q -- "$2"
+	env -i PATH="$PATH" HOME="$HOME" CASS_ENV="$1" "$PREFIX/askcass" test 2>&1 | grep -q -- "$2"
 }
 
 for script in "$ROOT"/bin/* "$ROOT"/scripts/*.sh; do
@@ -67,16 +67,16 @@ for script in "$ROOT"/bin/* "$ROOT"/scripts/*.sh; do
 done
 
 check "make install succeeds" make -C "$ROOT" install PREFIX="$PREFIX"
-check "install leaves a working symlink, not a dangling one" test -x "$PREFIX/ask"
+check "install leaves a working symlink, not a dangling one" test -x "$PREFIX/askcass"
 
 # The operator-facing refusals must name what to fix, rather than failing
 # somewhere inside Go's module resolution.
 : > "$ENVDIR/empty"
 check "missing env file is reported by name" says "$ENVDIR/absent" "no environment file"
-check "an env file missing exports names the variables" says "$ENVDIR/empty" SROIAAA_MINDROUTER_ENDPOINT
+check "an env file missing exports names the variables" says "$ENVDIR/empty" CASS_MINDROUTER_ENDPOINT
 
 check "make uninstall succeeds" make -C "$ROOT" uninstall PREFIX="$PREFIX"
-check "uninstall removes the symlink" test ! -e "$PREFIX/ask"
+check "uninstall removes the symlink" test ! -e "$PREFIX/askcass"
 
 printf '\n'
 if [ "$failures" -eq 0 ]; then

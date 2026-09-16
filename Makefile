@@ -9,14 +9,14 @@ BINARY ?= cass-agent
 help:
 	@echo 'Setup and checks:'
 	@echo '  make test              unit tests; no credentials, no network'
-	@echo '  make install           put `ask` on your PATH (PREFIX=... to choose where)'
+	@echo '  make install           put `askcass` on your PATH (PREFIX=... to choose where)'
 	@echo '  make verify            everything that must pass before main; no credentials'
-	@echo '  make check-entrypoints check install, uninstall, and ask startup'
+	@echo '  make check-entrypoints check install, uninstall, and askcass startup'
 	@echo '  make test-rt-live      RT invariants against live data (needs RT credentials)'
 	@echo '  make eval-rt-shape     does the model bound a ticket-age question (needs credentials)'
 	@echo '  make fmt               gofmt the tree'
 	@echo ''
-	@echo 'These need:  source ~/.config/sroiaaa/env'
+	@echo 'These need:  source ~/.config/cass/env'
 	@echo '  make probe             ask the Zabbix trap questions and judge them by eye'
 	@echo '  make netbox-probe      reconnaissance against the NetBox API (no connector yet)'
 	@echo '  make eval-zabbix       grade the Zabbix path end to end'
@@ -29,7 +29,7 @@ help:
 	@echo ''
 	@echo 'Reports are written to runtime/*.md and printed to stdout.'
 
-# Puts `ask` on your PATH, at a location the person installing chooses:
+# Puts `askcass` on your PATH, at a location the person installing chooses:
 #
 #   make install                     ~/.local/bin, or ~/bin if that is what you have
 #   make install PREFIX=/opt/cass ~/somewhere else
@@ -45,15 +45,15 @@ PREFIX ?= $(if $(wildcard $(HOME)/bin),$(HOME)/bin,$(HOME)/.local/bin)
 
 install:
 	@mkdir -p $(PREFIX)
-	@ln -sf $(CURDIR)/bin/ask $(PREFIX)/ask
-	@echo 'linked $(PREFIX)/ask -> $(CURDIR)/bin/ask'
+	@ln -sf $(CURDIR)/bin/askcass $(PREFIX)/askcass
+	@echo 'linked $(PREFIX)/askcass -> $(CURDIR)/bin/askcass'
 	@case ":$$PATH:" in *":$(PREFIX):"*) ;; \
 	  *) echo 'NOTE: $(PREFIX) is not on your PATH; add it in ~/.bashrc' ;; esac
-	@echo 'try:  ask "how many agents are disconnected right now?"'
+	@echo 'try:  askcass "how many agents are disconnected right now?"'
 
 uninstall:
-	@rm -f $(PREFIX)/ask
-	@echo 'removed $(PREFIX)/ask'
+	@rm -f $(PREFIX)/askcass
+	@echo 'removed $(PREFIX)/askcass'
 
 test:
 	$(GO) test ./...
@@ -68,7 +68,7 @@ verify:
 	@sh ./scripts/verify.sh
 
 # The path a new contributor walks before any Go test is relevant: make
-# install, then typing `ask`. Needs no credentials and no network.
+# install, then typing `askcass`. Needs no credentials and no network.
 check-entrypoints:
 	@sh ./scripts/check_entrypoints.sh
 
@@ -125,7 +125,7 @@ fitness:
 	sh ./scripts/harness_fitness.sh
 
 # Evaluations need live credentials exported into the environment, which the
-# runtime env file provides:  source ~/.config/sroiaaa/env
+# runtime env file provides:  source ~/.config/cass/env
 #
 # Each one prints to stdout AND writes runtime/<name>.md. If you go looking for
 # the results afterwards, that is where they are -- with a .md suffix, which is
