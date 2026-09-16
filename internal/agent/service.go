@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	agentName    = "sroiaaa-agent"
+	agentName    = "cass-agent"
 	agentVersion = "0.1.0"
 )
 

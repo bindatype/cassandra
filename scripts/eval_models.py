@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grade tool-capable models on the SROIAAA evidence loop.
+"""Grade tool-capable models on the Cass evidence loop.
 
 Usage:
     source ~/.config/sroiaaa/env
@@ -87,7 +87,7 @@ def main():
         if row["faults"]:
             lines.append("- `%s` / `%s`: %s" % (row["model"], row["case"],
                                                 "; ".join(row["faults"])))
-    write_report("eval-models.md", "SROIAAA model survey", lines)
+    write_report("eval-models.md", "Cass model survey", lines)
 
 
 if __name__ == "__main__":

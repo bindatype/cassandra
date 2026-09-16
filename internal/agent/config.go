@@ -73,7 +73,7 @@ func LoadConfigFromEnv() (Config, error) {
 		IdleTimeout:       envDuration("SROIAAA_IDLE_TIMEOUT", defaultIdleTimeout),
 	}
 
-	roots := strings.Split(envOrDefault("SROIAAA_ALLOWED_ROOTS", "/workspace,/tmp,/var/log/sroiaaa"), ",")
+	roots := strings.Split(envOrDefault("SROIAAA_ALLOWED_ROOTS", "/workspace,/tmp,/var/log/cass"), ",")
 	for _, root := range roots {
 		root = strings.TrimSpace(root)
 		if root == "" {

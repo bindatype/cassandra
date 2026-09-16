@@ -18,8 +18,8 @@ func TestRunProducesBoundedLivePlan(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("expected success, got %d: %s", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), `"source": "sroiaaa-agent"`) ||
-		!strings.Contains(stdout.String(), `"path": "/var/log/sroiaaa/system.log"`) {
+	if !strings.Contains(stdout.String(), `"source": "cass-agent"`) ||
+		!strings.Contains(stdout.String(), `"path": "/var/log/cass/system.log"`) {
 		t.Fatalf("unexpected plan: %s", stdout.String())
 	}
 }
@@ -47,7 +47,7 @@ func writeTestPolicy(t *testing.T) string {
 		"resources": {
 			"system-log": {
 				"operation": "filesystem.tail",
-				"path": "/var/log/sroiaaa/system.log",
+				"path": "/var/log/cass/system.log",
 				"params": {"max_bytes": 8192}
 			}
 		}

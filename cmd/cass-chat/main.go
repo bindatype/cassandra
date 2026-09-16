@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
-	"github.com/maclach/sroiaaa/internal/connector"
-	"github.com/maclach/sroiaaa/internal/orchestrator"
+	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/connector"
+	"github.com/bindatype/cassandra/internal/orchestrator"
 )
 
 const (
@@ -34,7 +34,7 @@ const (
 	auditPathEnv           = "SROIAAA_BROKER_AUDIT"
 	rtEndpointEnv          = "SROIAAA_RT_ENDPOINT"
 	rtTokenEnv             = "RT_API_TOKEN"
-	sroiaaaAgentConfigEnv  = "SROIAAA_AGENT_CONFIG"
+	cassAgentConfigEnv     = "SROIAAA_AGENT_CONFIG"
 	// rtQueuesEnv names the RT queues this deployment allows searching, as a
 	// comma-separated list. Site configuration, not a connector default: RT
 	// queues are organization-specific and there is no safe default that
@@ -70,7 +70,7 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("sroiaaa-chat", flag.ContinueOnError)
+	flags := flag.NewFlagSet("cass-chat", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	policyPath := flags.String("policy", "", "path to a broker policy JSON file")
 	model := flags.String("model", configuredModel(), "model or alias to ask")
@@ -88,11 +88,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Two separate failures, because a message naming the wrong flag sends the
 	// operator to fix something that was never wrong.
 	if *policyPath == "" {
-		fmt.Fprintln(stderr, "sroiaaa-chat: -policy is required")
+		fmt.Fprintln(stderr, "cass-chat: -policy is required")
 		return 2
 	}
 	if *model == "" {
-		fmt.Fprintln(stderr, "sroiaaa-chat: -model must name a model or alias")
+		fmt.Fprintln(stderr, "cass-chat: -model must name a model or alias")
 		return 2
 	}
 
@@ -100,26 +100,26 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if question == "" {
 		raw, err := io.ReadAll(io.LimitReader(stdin, 8192))
 		if err != nil {
-			fmt.Fprintf(stderr, "sroiaaa-chat: read question: %v\n", err)
+			fmt.Fprintf(stderr, "cass-chat: read question: %v\n", err)
 			return 1
 		}
 		question = strings.TrimSpace(string(raw))
 	}
 	if question == "" {
-		fmt.Fprintln(stderr, "sroiaaa-chat: no question supplied")
+		fmt.Fprintln(stderr, "cass-chat: no question supplied")
 		return 2
 	}
 
 	session, err := buildSession(*policyPath, *model, *endpoint, *zabbixEndpoint, *wazuhEndpoint, *rtEndpoint, *wazuhInsecure, *showTrace)
 	if err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-chat: %v\n", err)
+		fmt.Fprintf(stderr, "cass-chat: %v\n", err)
 		return 2
 	}
 
 	if *auditPath != "" {
 		auditor, err := orchestrator.NewAuditor(*auditPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "sroiaaa-chat: open audit: %v\n", err)
+			fmt.Fprintf(stderr, "cass-chat: open audit: %v\n", err)
 			return 2
 		}
 		defer auditor.Close()
@@ -140,7 +140,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	if askErr != nil {
-		fmt.Fprintf(stderr, "sroiaaa-chat: %v\n", askErr)
+		fmt.Fprintf(stderr, "cass-chat: %v\n", askErr)
 		return 1
 	}
 
@@ -258,12 +258,12 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 		}
 		connectors = append(connectors, rt)
 	}
-	if rawAgents := os.Getenv(sroiaaaAgentConfigEnv); rawAgents != "" {
-		agents, err := connector.ParseSROIAAAAgents(rawAgents)
+	if rawAgents := os.Getenv(cassAgentConfigEnv); rawAgents != "" {
+		agents, err := connector.ParseCassAgents(rawAgents)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", sroiaaaAgentConfigEnv, err)
+			return nil, fmt.Errorf("%s: %w", cassAgentConfigEnv, err)
 		}
-		agentConnector, err := connector.NewSROIAAAConnector(connector.SROIAAAConfig{Agents: agents})
+		agentConnector, err := connector.NewCassConnector(connector.CassConfig{Agents: agents})
 		if err != nil {
 			return nil, err
 		}
@@ -351,8 +351,8 @@ func unconfiguredSources(zabbixEndpoint, wazuhEndpoint, rtEndpoint string) []str
 	if rtEndpoint == "" {
 		off = append(off, "Request Tracker tickets (set "+rtEndpointEnv+", "+rtTokenEnv+", "+rtQueuesEnv+")")
 	}
-	if os.Getenv(sroiaaaAgentConfigEnv) == "" {
-		off = append(off, "endpoint evidence (set "+sroiaaaAgentConfigEnv+")")
+	if os.Getenv(cassAgentConfigEnv) == "" {
+		off = append(off, "endpoint evidence (set "+cassAgentConfigEnv+")")
 	}
 	return off
 }

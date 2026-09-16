@@ -1,6 +1,6 @@
 GO ?= go
 DIST ?= dist
-BINARY ?= sroiaaa-agent
+BINARY ?= cass-agent
 
 .PHONY: help install uninstall test verify check-entrypoints test-rt-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
 
@@ -32,7 +32,7 @@ help:
 # Puts `ask` on your PATH, at a location the person installing chooses:
 #
 #   make install                     ~/.local/bin, or ~/bin if that is what you have
-#   make install PREFIX=/opt/sroiaaa ~/somewhere else
+#   make install PREFIX=/opt/cass ~/somewhere else
 #
 # A symlink rather than a copy, so it cannot go stale the way a hand-placed
 # binary in ~/bin did -- that one was two days and four connector changes
@@ -100,23 +100,23 @@ eval-rt-shape:
 	python3 ./scripts/eval_rt_shape.py
 
 run:
-	$(GO) run ./cmd/sroiaaa-agent
+	$(GO) run ./cmd/cass-agent
 
 fmt:
 	$(GO) fmt ./...
 
 build-linux-amd64:
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o $(DIST)/$(BINARY)-linux-amd64 ./cmd/sroiaaa-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o $(DIST)/$(BINARY)-linux-amd64 ./cmd/cass-agent
 
 build-linux-arm64:
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o $(DIST)/$(BINARY)-linux-arm64 ./cmd/sroiaaa-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o $(DIST)/$(BINARY)-linux-arm64 ./cmd/cass-agent
 
 build-linux-all: build-linux-amd64 build-linux-arm64
 
 docker-build:
-	docker build -t sroiaaa:phase1 .
+	docker build -t cass:phase1 .
 
 docker-up:
 	docker compose up --build
@@ -159,7 +159,7 @@ probe:
 	sh ./bin/zabbix-probe.sh
 
 # NetBox has no connector yet, so this talks to the API directly rather than
-# asking SROIAAA anything. Learning what a source actually returns is the step
+# asking Cass anything. Learning what a source actually returns is the step
 # that comes before teaching the broker to ask it; every trap in the Zabbix
 # guide was found this way and none were in the vendor documentation.
 netbox-probe:

@@ -7,11 +7,11 @@
 #   sh bin/zoom-digest.sh -n Wazuh   # just that one section
 #
 # From cron, source the environment first; cron gets almost none of it:
-#   45 4 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/SROIAAA/bin/zoom-digest.sh
+#   45 4 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/Cass/bin/zoom-digest.sh
 #:usage-end
 #
 # Give cron the FULL path to this script rather than `cd`-ing to the repo and
-# using a relative one. That line used to read `cd $HOME/sroiaaa-src && sh
+# using a relative one. That line used to read `cd $HOME/cass-src && sh
 # bin/zoom-digest.sh`; the repository moved, the `cd` failed, `&&` swallowed
 # the rest, and the digest stopped for six days without one word in the log --
 # because the redirect that would have caught the error was attached to the
@@ -19,7 +19,7 @@
 #
 # The signature construction Zoom accepts was confirmed on 2026-08-30 and is
 # the built-in default, so SROIAAA_ZOOM_SIGNATURE_VARIANT need not be set. If
-# posting starts returning 401, run  sroiaaa-notify -probe  before assuming
+# posting starts returning 401, run  cass-notify -probe  before assuming
 # the secret is wrong.
 #
 # Read-only throughout. Nothing here modifies any system.
@@ -43,7 +43,7 @@ esac
 ONLY=${1:-}
 
 # Fail before asking anything. Without this the first missing variable surfaces
-# from sroiaaa-notify at the end of a pipeline, after a question has already
+# from cass-notify at the end of a pipeline, after a question has already
 # been answered, and reads as a Zoom problem rather than a missing source.
 #
 # ~/.config/sroiaaa/env is sourced explicitly and not from ~/.bashrc, so a
@@ -89,12 +89,12 @@ RECEIPT=${SROIAAA_DIGEST_RECEIPT:-"$HOME/.local/state/sroiaaa/zoom-digest.receip
 mkdir -p "$BIN"
 # The build must run INSIDE the module. Naming the package by absolute path is
 # not enough: go resolves go.mod from the working directory. This script got
-# away with it for as long as its cron line began `cd $HOME/sroiaaa-src`, which
+# away with it for as long as its cron line began `cd $HOME/cass-src`, which
 # was doing the build's job by accident; the first run after that cd was
 # removed failed with "go.mod file not found in current directory". bin/ask
 # already carries this same subshell for the same reason.
-(cd "$ROOT" && go build -o "$BIN/sroiaaa-chat" ./cmd/sroiaaa-chat)
-[ "$DRY" -eq 1 ] || (cd "$ROOT" && go build -o "$BIN/sroiaaa-notify" ./cmd/sroiaaa-notify)
+(cd "$ROOT" && go build -o "$BIN/cass-chat" ./cmd/cass-chat)
+[ "$DRY" -eq 1 ] || (cd "$ROOT" && go build -o "$BIN/cass-notify" ./cmd/cass-notify)
 
 # A failed question must not post a cheerful empty message, and must not stop
 # the questions after it. Each one stands or falls alone.
@@ -106,7 +106,7 @@ digest() {
 	*) return 0 ;;
 	esac
 
-	if answer=$("$BIN/sroiaaa-chat" -policy "$POLICY" -wazuh-insecure "$question" 2>&1); then
+	if answer=$("$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure "$question" 2>&1); then
 		body=$answer
 	else
 		title="$title (failed)"
@@ -123,7 +123,7 @@ digest() {
 	# A section that could not be answered still posts, saying so; what is
 	# counted here is whether the message reached the channel, which is the
 	# only thing the watchdog can act on.
-	if printf '%s\n' "$body" | "$BIN/sroiaaa-notify" -title "$title"; then
+	if printf '%s\n' "$body" | "$BIN/cass-notify" -title "$title"; then
 		POSTED=$((POSTED + 1))
 	else
 		UNSENT=$((UNSENT + 1))

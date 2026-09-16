@@ -1,7 +1,7 @@
 #!/bin/sh
 # Reconnaissance against the NetBox REST API, before any connector exists.
 #
-# This is not zabbix-probe.sh. That one asks SROIAAA questions end to end and
+# This is not zabbix-probe.sh. That one asks Cass questions end to end and
 # judges the answers. This one talks to the API directly, because the empirical
 # method here is to learn what a source actually returns before deciding what
 # the broker should be allowed to ask it. Every trap in the Zabbix guide was

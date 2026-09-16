@@ -18,7 +18,7 @@ type Source string
 const (
 	SourceWazuhAPI       Source = "wazuh-api"
 	SourceZabbixAPI      Source = "zabbix-api"
-	SourceSROIAAA        Source = "sroiaaa-agent"
+	SourceCass           Source = "cass-agent"
 	SourcePegasusDB      Source = "pegasus-db"
 	SourceRequestTracker Source = "rt-api"
 )
@@ -33,7 +33,7 @@ func SourceForIntent(intent Intent) (Source, bool) {
 	case IntentMonitoringProblems:
 		return SourceZabbixAPI, true
 	case IntentLiveEvidence:
-		return SourceSROIAAA, true
+		return SourceCass, true
 	case IntentDatabaseQuery:
 		return SourcePegasusDB, true
 	case IntentMonitoringHistory:

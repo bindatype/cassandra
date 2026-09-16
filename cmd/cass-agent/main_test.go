@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/agent"
+	"github.com/bindatype/cassandra/internal/agent"
 )
 
 func TestNewHTTPServerAppliesConfig(t *testing.T) {

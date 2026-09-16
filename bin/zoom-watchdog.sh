@@ -7,12 +7,12 @@
 #
 # From cron, at least 2h15m after the digest -- see MAX_AGE_HOURS below, the
 # gap is load-bearing and 06:30 is too early to catch a same-day failure:
-#   0 8 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/SROIAAA/bin/zoom-watchdog.sh
+#   0 8 * * * . $HOME/.config/sroiaaa/env && sh $HOME/dev/Cass/bin/zoom-watchdog.sh
 #:usage-end
 #
 # WHY THIS EXISTS
 #
-# The digest ran at 04:45 from a cron line that began `cd $HOME/sroiaaa-src`.
+# The digest ran at 04:45 from a cron line that began `cd $HOME/cass-src`.
 # The repository moved. `cd` failed, `&&` swallowed the rest, and because the
 # `>> log` redirect was attached to the command that never ran, the log was not
 # even touched. It stopped for six days. Nobody noticed, and the last thing in
@@ -105,7 +105,7 @@ how it failed before, silently. Check:  crontab -l"
 	elif [ "${posted:-0}" -eq 0 ]; then
 		alarm="The digest ran ${age_hours}h ago but no section reached the channel.
 The questions may be failing, or the Zoom credential may have expired.
-Try:  sroiaaa-notify -probe"
+Try:  cass-notify -probe"
 	fi
 fi
 
@@ -125,11 +125,11 @@ if [ -n "${SROIAAA_ZOOM_WEBHOOK_URL:-}" ] &&
 	[ -n "${SROIAAA_ZOOM_WEBHOOK_SECRET:-}${SROIAAA_ZOOM_WEBHOOK_TOKEN:-}" ]; then
 	# cd into the module: go resolves go.mod from the working directory, not
 	# from the package path. See the same subshell in bin/zoom-digest.sh.
-	if mkdir -p "$BIN" 2>/dev/null && (cd "$ROOT" && go build -o "$BIN/sroiaaa-notify" ./cmd/sroiaaa-notify) 2>/dev/null; then
-		printf '%s\n' "$alarm" | "$BIN/sroiaaa-notify" -title "Morning digest is not running" ||
+	if mkdir -p "$BIN" 2>/dev/null && (cd "$ROOT" && go build -o "$BIN/cass-notify" ./cmd/cass-notify) 2>/dev/null; then
+		printf '%s\n' "$alarm" | "$BIN/cass-notify" -title "Morning digest is not running" ||
 			echo "zoom-watchdog: could not post the alarm to Zoom either" >&2
 	else
-		echo "zoom-watchdog: could not build sroiaaa-notify from $ROOT to post the alarm" >&2
+		echo "zoom-watchdog: could not build cass-notify from $ROOT to post the alarm" >&2
 	fi
 else
 	echo "zoom-watchdog: no Zoom credential in this environment; alarm not posted" >&2

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 const (

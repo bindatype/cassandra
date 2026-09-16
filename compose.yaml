@@ -1,5 +1,5 @@
 services:
-  sroiaaa:
+  cass:
     build:
       context: .
     ports:
@@ -7,7 +7,7 @@ services:
     environment:
       SROIAAA_BIND_ADDR: ":8080"
       SROIAAA_AUTH_TOKEN: "${SROIAAA_AUTH_TOKEN:?set SROIAAA_AUTH_TOKEN}"
-      SROIAAA_ALLOWED_ROOTS: "/workspace,/tmp,/var/log/sroiaaa"
+      SROIAAA_ALLOWED_ROOTS: "/workspace,/tmp,/var/log/cass"
       SROIAAA_PROC_ROOT: "/proc"
       SROIAAA_ENABLED_OPERATIONS: "capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail"
       SROIAAA_HOST_INFO_FIELDS: "hostname,os,arch,cpus,uptime_seconds,kernel_version"
@@ -23,7 +23,7 @@ services:
       SROIAAA_IDLE_TIMEOUT: "60s"
     volumes:
       - ./testdata/workspace:/workspace:ro
-      - ./testdata/varlog:/var/log/sroiaaa:ro
+      - ./testdata/varlog:/var/log/cass:ro
       - ./runtime:/runtime
     read_only: true
     cap_drop:

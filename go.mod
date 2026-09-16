@@ -1,4 +1,4 @@
-module github.com/maclach/sroiaaa
+module github.com/bindatype/cassandra
 
 go 1.24.5
 

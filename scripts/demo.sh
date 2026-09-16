@@ -1,5 +1,5 @@
 #!/bin/sh
-# A short walkthrough of the SROIAAA evidence loop, for showing someone.
+# A short walkthrough of the Cass evidence loop, for showing someone.
 #
 #   source ~/.config/sroiaaa/env
 #   sh scripts/demo.sh
@@ -12,12 +12,12 @@ POLICY=${SROIAAA_POLICY:-"$ROOT/configs/broker-policy.example.json"}
 BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
 
 mkdir -p "$BIN"
-go build -o "$BIN/sroiaaa-chat" "$ROOT/cmd/sroiaaa-chat"
-go build -o "$BIN/sroiaaa-broker-plan" "$ROOT/cmd/sroiaaa-broker-plan"
-go build -o "$BIN/sroiaaa-broker-exec" "$ROOT/cmd/sroiaaa-broker-exec"
+go build -o "$BIN/cass-chat" "$ROOT/cmd/cass-chat"
+go build -o "$BIN/cass-broker-plan" "$ROOT/cmd/cass-broker-plan"
+go build -o "$BIN/cass-broker-exec" "$ROOT/cmd/cass-broker-exec"
 
-AUDIT=$(mktemp "${TMPDIR:-/tmp}/sroiaaa-demo-audit.XXXXXX")
-ask() { "$BIN/sroiaaa-chat" -policy "$POLICY" -wazuh-insecure -audit "$AUDIT" "$@"; }
+AUDIT=$(mktemp "${TMPDIR:-/tmp}/cass-demo-audit.XXXXXX")
+ask() { "$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure -audit "$AUDIT" "$@"; }
 
 rule() { printf '\n\033[1m%s\033[0m\n%s\n' "$1" "----------------------------------------------------------------"; }
 
@@ -42,8 +42,8 @@ ask -trace "are there any critical CVEs on the login nodes?" || true
 
 rule "5. The broker cannot be bypassed by writing your own plan"
 echo "A hand-written plan asking for a file no policy authorizes:"
-printf '%s\n' '{"version":1,"intent":"live.evidence","steps":[{"source":"sroiaaa-agent","action":"operations.execute","host":"docker-harness","operation":"filesystem.read","target":{"path":"/etc/shadow"},"params":{"max_bytes":8192}}]}' \
-  | "$BIN/sroiaaa-broker-exec" -policy "$POLICY" || true
+printf '%s\n' '{"version":1,"intent":"live.evidence","steps":[{"source":"cass-agent","action":"operations.execute","host":"docker-harness","operation":"filesystem.read","target":{"path":"/etc/shadow"},"params":{"max_bytes":8192}}]}' \
+  | "$BIN/cass-broker-exec" -policy "$POLICY" || true
 echo
 echo "The executor reconstructs every plan policy could have produced and"
 echo "requires a match. A substituted path, an inflated limit, or an extra"

@@ -132,7 +132,7 @@ def main():
         lines.append("| `%s` | %.1f | %s |" % (
             row["case"], row["seconds"],
             "pass" if not row["faults"] else "FAIL: " + "; ".join(row["faults"])))
-    write_report("eval-pegasus.md", "SROIAAA accounting-database evaluation", lines)
+    write_report("eval-pegasus.md", "Cass accounting-database evaluation", lines)
 
 
 if __name__ == "__main__":

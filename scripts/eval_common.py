@@ -1,4 +1,4 @@
-"""Shared helpers for SROIAAA evidence-loop evaluations.
+"""Shared helpers for Cass evidence-loop evaluations.
 
 Ground truth is always fetched live rather than hard coded. Fleet counts are
 stable enough to compare directly; problem counts move continuously, so they
@@ -92,8 +92,8 @@ def require_env(*sources):
 def build_chat():
     """Build the chat binary into runtime/ so evaluations test current code."""
     os.makedirs(RUNTIME, exist_ok=True)
-    binary = os.path.join(RUNTIME, "sroiaaa-chat")
-    subprocess.run(["go", "build", "-o", binary, "./cmd/sroiaaa-chat"],
+    binary = os.path.join(RUNTIME, "cass-chat")
+    subprocess.run(["go", "build", "-o", binary, "./cmd/cass-chat"],
                    cwd=ROOT, check=True)
     return binary
 

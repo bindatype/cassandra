@@ -24,7 +24,7 @@ func clearEnv(t *testing.T) {
 		zabbixEndpointEnv, zabbixTokenEnv,
 		wazuhEndpointEnv, wazuhUsernameEnv, wazuhPasswordEnv, wazuhCriticalGroupsEnv,
 		pegasusDSNEnv, pegasusMaxRowsEnv, pegasusMaxBytesEnv, auditPathEnv,
-		rtEndpointEnv, rtTokenEnv, rtQueuesEnv, sroiaaaAgentConfigEnv,
+		rtEndpointEnv, rtTokenEnv, rtQueuesEnv, cassAgentConfigEnv,
 	} {
 		t.Setenv(name, "")
 	}
@@ -217,13 +217,13 @@ func TestHalfConfiguredSourceIsRefused(t *testing.T) {
 // broken unless something says so.
 func TestUnconfiguredSourcesNameTheirVariables(t *testing.T) {
 	t.Setenv(pegasusDSNEnv, "")
-	t.Setenv(sroiaaaAgentConfigEnv, "")
+	t.Setenv(cassAgentConfigEnv, "")
 	off := strings.Join(unconfiguredSources("", "", ""), "; ")
 
 	for _, name := range []string{
 		zabbixEndpointEnv, wazuhEndpointEnv, pegasusDSNEnv,
 		rtEndpointEnv, rtTokenEnv, rtQueuesEnv,
-		sroiaaaAgentConfigEnv,
+		cassAgentConfigEnv,
 	} {
 		if !strings.Contains(off, name) {
 			t.Errorf("the note does not name %s, so nobody learns to set it: %q", name, off)
@@ -239,7 +239,7 @@ func TestUnconfiguredSourcesNameTheirVariables(t *testing.T) {
 func TestEndpointAgentConfigurationOffersLiveEvidence(t *testing.T) {
 	clearEnv(t)
 	t.Setenv(mindrouterKeyEnv, "test-key")
-	t.Setenv(sroiaaaAgentConfigEnv, `{
+	t.Setenv(cassAgentConfigEnv, `{
 		"docker-harness": {
 			"endpoint": "http://127.0.0.1:18081",
 			"token": "agent-token"

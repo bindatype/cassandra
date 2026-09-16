@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ask SROIAAA a question.
+# Ask Cass a question.
 #
 #   ask "how many agents are disconnected right now?"
 #   ask -model llama3.3:latest "what is broken on dss01?"
@@ -59,6 +59,6 @@ mkdir -p "$BIN"
 # The build must run inside the module. Naming the package by absolute path is
 # not enough: go resolves go.mod from the working directory, and this script is
 # meant to be run from wherever you happen to be standing.
-(cd "$ROOT" && go build -o "$BIN/sroiaaa-chat" ./cmd/sroiaaa-chat)
+(cd "$ROOT" && go build -o "$BIN/cass-chat" ./cmd/cass-chat)
 
-exec "$BIN/sroiaaa-chat" -policy "$POLICY" -wazuh-insecure "$@"
+exec "$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure "$@"

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 // The prompt is English the compiler cannot check, but parts of it are load

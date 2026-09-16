@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 // Connector executes a single route step against one data source.

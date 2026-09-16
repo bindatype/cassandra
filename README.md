@@ -1,6 +1,6 @@
-# SROIAAA Phase One Prototype
+# Cassandra Phase One Prototype
 
-Secure Read-Only Infrastructure API for AI and Automation, or SROIAAA,
+Secure Read-Only Infrastructure API for AI and Automation, or Cassandra,
 is a Phase One prototype for a safe, read-only Linux endpoint agent.
 The long-term target is a native Linux service managed by `systemd`;
 Docker is used here only as a controlled development harness.
@@ -41,10 +41,10 @@ Core constraints:
 ## Layout
 
 ```text
-cmd/sroiaaa-agent/         endpoint agent
-cmd/sroiaaa-broker-plan/   turns an intent into a route plan
-cmd/sroiaaa-broker-exec/   executes a route plan against live sources
-cmd/sroiaaa-chat/          asks a question in natural language
+cmd/cass-agent/         endpoint agent
+cmd/cass-broker-plan/   turns an intent into a route plan
+cmd/cass-broker-exec/   executes a route plan against live sources
+cmd/cass-chat/          asks a question in natural language
 internal/agent/            API, execution, validation, audit logic
 internal/broker/           deterministic policy and routing kernel
 internal/connector/        Zabbix, Wazuh, and Request Tracker connectors, plan executor
@@ -61,9 +61,9 @@ testdata/varlog/           sample log files mounted into the container
 ## Quick start
 
 ```bash
-git clone https://github.com/bindatype/SROIAAA.git
-cd SROIAAA
-export SROIAAA_AUTH_TOKEN="${SROIAAA_AUTH_TOKEN:-dev-sroiaaa-token}"
+git clone https://github.com/bindatype/Cassandra.git
+cd Cassandra
+export SROIAAA_AUTH_TOKEN="${SROIAAA_AUTH_TOKEN:-dev-cass-token}"
 ```
 
 Every command below runs from the repository root. `make help` lists the
@@ -81,7 +81,7 @@ Joining the project rather than just running it? Start with
 
 ```bash
 go test ./...
-go run ./cmd/sroiaaa-agent
+go run ./cmd/cass-agent
 ```
 
 The native server listens on `127.0.0.1:8080` by default and requires a
@@ -92,14 +92,14 @@ TLS-authenticated broker or reverse proxy.
 To override the host-run port explicitly:
 
 ```bash
-SROIAAA_BIND_ADDR=127.0.0.1:18081 go run ./cmd/sroiaaa-agent
+SROIAAA_BIND_ADDR=127.0.0.1:18081 go run ./cmd/cass-agent
 ```
 
 To listen on all IPv6 interfaces, including IPv4 where the host permits
 dual-stack sockets:
 
 ```bash
-SROIAAA_BIND_ADDR='[::]:18081' go run ./cmd/sroiaaa-agent
+SROIAAA_BIND_ADDR='[::]:18081' go run ./cmd/cass-agent
 ```
 
 ### Cross-architecture builds
@@ -113,8 +113,8 @@ make build-linux-all
 
 This writes:
 
-- `dist/sroiaaa-agent-linux-amd64`
-- `dist/sroiaaa-agent-linux-arm64`
+- `dist/cass-agent-linux-amd64`
+- `dist/cass-agent-linux-arm64`
 
 ### Docker harness
 
@@ -129,7 +129,7 @@ not remotely reachable by default.
 The compose harness:
 
 - runs the agent as a non-root user
-- mounts sample data read-only at `/workspace` and `/var/log/sroiaaa`
+- mounts sample data read-only at `/workspace` and `/var/log/cass`
 - uses a read-only container filesystem
 - drops Linux capabilities
 - explicitly enables the safe default operation and host-information policies
@@ -216,7 +216,7 @@ Configuration is environment-driven:
 - `SROIAAA_BIND_ADDR` default `127.0.0.1:8080`
 - `SROIAAA_AUTH_TOKEN` required single bearer token
 - `SROIAAA_AUTH_TOKENS` optional comma-separated additional valid tokens for rotation
-- `SROIAAA_ALLOWED_ROOTS` default `/workspace,/tmp,/var/log/sroiaaa`
+- `SROIAAA_ALLOWED_ROOTS` default `/workspace,/tmp,/var/log/cass`
 - `SROIAAA_PROC_ROOT` default `/proc`
 - `SROIAAA_ENABLED_OPERATIONS` default `capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.read,filesystem.tail`
 - `SROIAAA_HOST_INFO_FIELDS` default `hostname,os,arch,cpus,uptime_seconds,kernel_version`
@@ -250,7 +250,7 @@ withholds it and returns `503 audit_unavailable`.
 
 ## Broker routing experiment
 
-Broker v0 plans; `sroiaaa-broker-exec` executes. Neither listens on a
+Broker v0 plans; `cass-broker-exec` executes. Neither listens on a
 network port. The planner turns a small structured intent into a
 deterministic route plan; the executor dispatches each step to a
 connector.
@@ -268,18 +268,18 @@ a swapped operation, or an extra step all fail verification.
 | `agent.status` | Wazuh API `agents.status` |
 | `monitoring.problems` | Zabbix API `trigger.get` |
 | `monitoring.history` | Zabbix API `event.get` |
-| `live.evidence` | A fixed SROIAAA operation from broker policy |
+| `live.evidence` | A fixed Cassandra operation from broker policy |
 | `database.query` | PegasusDB, one read-only `SELECT` |
 | `tickets.open` | RT API, open tickets in allowlisted queues |
 | `tickets.for_host` | RT API, open tickets whose subject names the host |
 
 MindRouter is used before routing to propose the structured intent and
 after evidence collection to synthesize an answer. It is not permitted to
-choose connector URLs, API methods, SROIAAA operations, or filesystem
+choose connector URLs, API methods, Cassandra operations, or filesystem
 paths.
 
 The broker policy is versioned JSON. `live_hosts` is an authorization
-scope for direct SROIAAA access, not a replacement fleet inventory;
+scope for direct Cassandra access, not a replacement fleet inventory;
 Wazuh remains the intended inventory source. Resource aliases map to
 fixed operations, canonical paths, and limits. The current broker kernel
 permits only bounded `filesystem.list`, `filesystem.stat`,
@@ -290,7 +290,7 @@ Generate a route plan against the safe harness example:
 ```bash
 printf '%s\n' \
   '{"intent":"live.evidence","host":"docker-harness","resource":"system-log"}' \
-  | go run ./cmd/sroiaaa-broker-plan \
+  | go run ./cmd/cass-broker-plan \
       -policy ./configs/broker-policy.example.json
 ```
 
@@ -304,7 +304,7 @@ A question in natural language, answered from live evidence:
 
 ```bash
 source ~/.config/sroiaaa/env
-go run ./cmd/sroiaaa-chat \
+go run ./cmd/cass-chat \
   -policy ./configs/broker-policy.example.json \
   -wazuh-insecure \
   "what problems are active on dss01?"
@@ -318,8 +318,8 @@ The same path without a model, one step per pipe:
 
 ```bash
 echo '{"intent":"monitoring.problems","host":"dss01"}' \
-  | go run ./cmd/sroiaaa-broker-plan -policy ./configs/broker-policy.example.json \
-  | go run ./cmd/sroiaaa-broker-exec -policy ./configs/broker-policy.example.json
+  | go run ./cmd/cass-broker-plan -policy ./configs/broker-policy.example.json \
+  | go run ./cmd/cass-broker-exec -policy ./configs/broker-policy.example.json
 ```
 
 Both halves take the policy. The planner uses it to authorize; the executor
@@ -343,7 +343,7 @@ These intents, and nothing else:
 | one agent's state, by exact name | `agent.status` | Wazuh API |
 | active problem triggers, optionally per host | `monitoring.problems` | Zabbix API |
 | what happened during a past window | `monitoring.history` | Zabbix API (event log) |
-| a policy-approved file from an endpoint | `live.evidence` | SROIAAA endpoint agent (no agent deployed yet) |
+| a policy-approved file from an endpoint | `live.evidence` | Cassandra endpoint agent (no agent deployed yet) |
 | aggregate/ad hoc HPC accounting questions | `database.query` | PegasusDB (one read-only `SELECT`) |
 | open tickets in allowlisted queues | `tickets.open` | Request Tracker REST 2.0 |
 | open tickets mentioning a host, by subject | `tickets.for_host` | Request Tracker REST 2.0 |
@@ -367,7 +367,7 @@ operator environment, never in a route plan. Each host has its own endpoint
 and bearer token, and remote agents must use HTTPS:
 
 **No endpoint agent is deployed in this environment yet.** The connector is
-written and tested, and `cmd/sroiaaa-agent` has existed since Phase One, but
+written and tested, and `cmd/cass-agent` has existed since Phase One, but
 nothing is running it as a service: there is no systemd unit and no host in
 `SROIAAA_AGENT_CONFIG`. Until one exists, `live.evidence` is planned and
 authorized by the broker and withheld from the model, exactly as it was before

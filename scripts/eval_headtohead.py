@@ -49,7 +49,7 @@ def ask(binary, model, question):
     if not answer:
         return "", "empty", seconds
     low = answer.lower()
-    if "sroiaaa_evidence" in low or "intent=" in low or "i will now" in low or "let's construct" in low:
+    if "cass_evidence" in low or "intent=" in low or "i will now" in low or "let's construct" in low:
         return answer, "narrated", seconds
     return answer, "", seconds
 
@@ -189,7 +189,7 @@ def main():
         lines.append("`%s`: **%d/%d**, average %.1fs per question."
                      % (model, total, RUNS * len(cases), avg))
 
-    write_report("eval-headtohead.md", "SROIAAA head-to-head model comparison", lines)
+    write_report("eval-headtohead.md", "Cass head-to-head model comparison", lines)
 
 
 if __name__ == "__main__":

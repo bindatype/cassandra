@@ -76,7 +76,7 @@ func TestRouterResolvesAuthorizedLiveResource(t *testing.T) {
 	}
 
 	step := plan.Steps[0]
-	if step.Source != SourceSROIAAA || step.Operation != "filesystem.tail" {
+	if step.Source != SourceCass || step.Operation != "filesystem.tail" {
 		t.Fatalf("unexpected live route: %+v", step)
 	}
 	if step.Target == nil || step.Target.Path != "/var/log/messages" {

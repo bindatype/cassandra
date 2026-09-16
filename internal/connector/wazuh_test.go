@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 func TestWazuhConnectorAuthenticatesThenListsAgents(t *testing.T) {

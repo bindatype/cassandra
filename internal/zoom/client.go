@@ -252,7 +252,7 @@ func (c *Client) Probe(ctx context.Context) ([]ProbeResult, error) {
 	if c.secret == "" {
 		return nil, fmt.Errorf("zoom: probe needs a signing secret")
 	}
-	text := "sroiaaa signature probe"
+	text := "cass signature probe"
 	timestamp := strconv.FormatInt(c.now().UnixMilli(), 10)
 	body := []byte(text)
 

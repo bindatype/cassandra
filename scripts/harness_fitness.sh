@@ -6,12 +6,12 @@ REPORT_PATH=${1:-"$ROOT_DIR/runtime/harness-fitness.md"}
 
 mkdir -p "$(dirname "$REPORT_PATH")"
 
-tmp_file=$(mktemp "${TMPDIR:-/tmp}/sroiaaa-fitness.XXXXXX")
+tmp_file=$(mktemp "${TMPDIR:-/tmp}/cass-fitness.XXXXXX")
 trap 'rm -f "$tmp_file"' EXIT INT TERM
 
 # Run the survey inside the live harness so the report reflects the
 # actual operator surface, not the host machine.
-docker compose exec -T sroiaaa sh <<'EOF' > "$tmp_file"
+docker compose exec -T cass sh <<'EOF' > "$tmp_file"
 set -eu
 
 busybox_path=$(command -v busybox 2>/dev/null || true)
@@ -74,7 +74,7 @@ generated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date)
 cap_eff=$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null || echo unknown)
 pretty_name=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2}' /etc/os-release 2>/dev/null || echo unknown)
 
-printf '# SROIAAA Harness Fitness Report\n\n'
+printf '# Cass Harness Fitness Report\n\n'
 printf -- '- Generated from harness: %s\n' "$generated_at"
 printf -- '- Identity: %s\n' "$(id)"
 printf -- '- OS: %s\n' "$pretty_name"

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
-	"github.com/maclach/sroiaaa/internal/connector"
+	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/connector"
 )
 
 const (
@@ -26,17 +26,17 @@ const (
 	pegasusMaxBytesEnv = "SROIAAA_PEGASUS_MAX_BYTES"
 	rtEndpointEnv      = "SROIAAA_RT_ENDPOINT"
 	rtTokenEnv         = "RT_API_TOKEN"
-	// sroiaaaAgentConfigEnv is a JSON host map. Each entry contains the one
+	// cassAgentConfigEnv is a JSON host map. Each entry contains the one
 	// endpoint and bearer token approved for that policy host; plans never
 	// carry either value.
-	sroiaaaAgentConfigEnv = "SROIAAA_AGENT_CONFIG"
+	cassAgentConfigEnv = "SROIAAA_AGENT_CONFIG"
 	// rtQueuesEnv names the RT queues this deployment allows searching, as a
 	// comma-separated list. Site configuration, so it lives here rather than
 	// in the connector: RT queues are organization-specific and there is no
 	// safe default that includes any of them.
 	rtQueuesEnv = "SROIAAA_RT_QUEUES"
 	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated.
-	// sroiaaa-chat has always read it; this path did not, so the same plan
+	// cass-chat has always read it; this path did not, so the same plan
 	// against the same environment produced evidence that could not say
 	// whether a critical agent was affected. Two paths the README calls
 	// equivalent must read the same configuration.
@@ -48,7 +48,7 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("sroiaaa-broker-exec", flag.ContinueOnError)
+	flags := flag.NewFlagSet("cass-broker-exec", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	policyPath := flags.String("policy", "", "broker policy the plan is verified against (required)")
 	zabbixEndpoint := flags.String("zabbix-endpoint", os.Getenv(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
@@ -61,13 +61,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	if *policyPath == "" {
-		fmt.Fprintln(stderr, "sroiaaa-broker-exec: -policy is required")
+		fmt.Fprintln(stderr, "cass-broker-exec: -policy is required")
 		return 2
 	}
 
 	plan, err := decodePlan(stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: %v\n", err)
 		return 1
 	}
 
@@ -75,12 +75,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// caller. Authorization happened when the planner ran; it is re-established
 	// here rather than assumed, so that a hand-written plan cannot execute.
 	if err := verifyPlan(*policyPath, plan); err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: %v\n", err)
 		return 1
 	}
 
 	if *wazuhInsecure {
-		fmt.Fprintln(stderr, "sroiaaa-broker-exec: warning: Wazuh TLS verification is disabled")
+		fmt.Fprintln(stderr, "cass-broker-exec: warning: Wazuh TLS verification is disabled")
 	}
 	connectors, err := buildConnectors(plan, connectorOptions{
 		zabbixEndpoint: *zabbixEndpoint,
@@ -89,12 +89,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		rtEndpoint:     *rtEndpoint,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: %v\n", err)
 		return 2
 	}
 	executor, err := connector.NewExecutor(connectors...)
 	if err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: %v\n", err)
 		return 1
 	}
 
@@ -103,14 +103,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	result, err := executor.Execute(ctx, plan)
 	if err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: execute: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: execute: %v\n", err)
 		return 1
 	}
 
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(result); err != nil {
-		fmt.Fprintf(stderr, "sroiaaa-broker-exec: encode result: %v\n", err)
+		fmt.Fprintf(stderr, "cass-broker-exec: encode result: %v\n", err)
 		return 1
 	}
 	return 0
@@ -258,12 +258,12 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		built = append(built, rt)
 	}
 
-	if needed[broker.SourceSROIAAA] {
-		agents, err := connector.ParseSROIAAAAgents(os.Getenv(sroiaaaAgentConfigEnv))
+	if needed[broker.SourceCass] {
+		agents, err := connector.ParseCassAgents(os.Getenv(cassAgentConfigEnv))
 		if err != nil {
-			return nil, fmt.Errorf("plan needs an endpoint agent: set %s: %w", sroiaaaAgentConfigEnv, err)
+			return nil, fmt.Errorf("plan needs an endpoint agent: set %s: %w", cassAgentConfigEnv, err)
 		}
-		agentConnector, err := connector.NewSROIAAAConnector(connector.SROIAAAConfig{Agents: agents})
+		agentConnector, err := connector.NewCassConnector(connector.CassConfig{Agents: agents})
 		if err != nil {
 			return nil, err
 		}
@@ -272,7 +272,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 
 	for source := range needed {
 		switch source {
-		case broker.SourceZabbixAPI, broker.SourceWazuhAPI, broker.SourcePegasusDB, broker.SourceRequestTracker, broker.SourceSROIAAA:
+		case broker.SourceZabbixAPI, broker.SourceWazuhAPI, broker.SourcePegasusDB, broker.SourceRequestTracker, broker.SourceCass:
 		default:
 			return nil, fmt.Errorf("no connector implemented for source %q", source)
 		}

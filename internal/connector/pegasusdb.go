@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bindatype/cassandra/internal/broker"
 	"github.com/go-sql-driver/mysql"
-	"github.com/maclach/sroiaaa/internal/broker"
 )
 
 const (
@@ -203,7 +203,7 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 // for the same reason: a page that cannot be told apart from a whole answer is
 // worse than a slower one.
 func (c *PegasusConnector) countRows(ctx context.Context, conn *sql.Conn, query string) (int, error) {
-	wrapped := "SELECT COUNT(*) FROM (" + strings.TrimRight(strings.TrimSpace(query), "; \t\n\r") + ") AS sroiaaa_rowcount"
+	wrapped := "SELECT COUNT(*) FROM (" + strings.TrimRight(strings.TrimSpace(query), "; \t\n\r") + ") AS cass_rowcount"
 
 	var total int
 	if err := conn.QueryRowContext(ctx, wrapped).Scan(&total); err != nil {

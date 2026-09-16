@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
-	"github.com/maclach/sroiaaa/internal/connector"
+	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/connector"
 )
 
 //go:embed prompt.md
@@ -54,7 +54,7 @@ func PromptRules() []string {
 }
 
 const (
-	toolName = "sroiaaa_evidence"
+	toolName = "cass_evidence"
 	// Headroom above what any connector will return, so evidence is rejected
 	// here only if a connector's own bound has failed. SROIAAA_MAX_EVIDENCE
 	// raises it in step with a raised connector cap.
@@ -122,9 +122,9 @@ func ToolDefinition(intents []string) any {
 		"type": "function",
 		"function": map[string]any{
 			"name": toolName,
-			"description": "Retrieve bounded, read-only infrastructure evidence through the SROIAAA policy broker. " +
+			"description": "Retrieve bounded, read-only infrastructure evidence through the Cass policy broker. " +
 				"Covers Wazuh agent inventory and connection state; Zabbix triggers firing now and the Zabbix " +
-				"event log for a past window; a policy-approved file read from an authorized SROIAAA endpoint; " +
+				"event log for a past window; a policy-approved file read from an authorized Cass endpoint; " +
 				"one read-only SQL SELECT against the pegasusdb HPC accounting database; and open Request " +
 				"Tracker tickets in allowlisted queues, metadata only. " +
 				"Does NOT cover vulnerabilities or CVEs, installed packages, patch level, log contents, user " +
@@ -628,7 +628,7 @@ func (s *Session) writeAudit() {
 	if err := s.auditor.Record(s.event); err != nil {
 		// Deliberately visible. An audit that fails quietly is worse than none,
 		// because it invites the belief that a record exists.
-		fmt.Fprintf(os.Stderr, "sroiaaa: AUDIT WRITE FAILED: %v\n", err)
+		fmt.Fprintf(os.Stderr, "cass: AUDIT WRITE FAILED: %v\n", err)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 func examplePolicy(t *testing.T) string {
@@ -178,7 +178,7 @@ func TestRunRejectsBadInvocations(t *testing.T) {
 }
 
 // TestBothPathsReadTheSameWazuhConfiguration pins a divergence found on
-// 2026-09-02. sroiaaa-chat read SROIAAA_WAZUH_CRITICAL_GROUPS and this path
+// 2026-09-02. cass-chat read SROIAAA_WAZUH_CRITICAL_GROUPS and this path
 // did not, so the same plan against the same environment produced evidence
 // that could not say whether a critical agent was affected -- and the
 // connector's own warning ("critical group membership was NOT evaluated")
@@ -190,12 +190,12 @@ func TestBothPathsReadTheSameWazuhConfiguration(t *testing.T) {
 		t.Fatalf("read own source: %v", err)
 	}
 	if !strings.Contains(string(source), "CriticalGroups:") {
-		t.Error("this path no longer passes CriticalGroups; a plan run here will differ from the same plan run by sroiaaa-chat")
+		t.Error("this path no longer passes CriticalGroups; a plan run here will differ from the same plan run by cass-chat")
 	}
 
-	chat, err := os.ReadFile("../sroiaaa-chat/main.go")
+	chat, err := os.ReadFile("../cass-chat/main.go")
 	if err != nil {
-		t.Fatalf("read sroiaaa-chat source: %v", err)
+		t.Fatalf("read cass-chat source: %v", err)
 	}
 	for _, name := range []string{
 		"SROIAAA_WAZUH_CRITICAL_GROUPS", "SROIAAA_RT_QUEUES", "RT_API_TOKEN", "SROIAAA_RT_ENDPOINT", "SROIAAA_AGENT_CONFIG",
@@ -225,7 +225,7 @@ func TestRTQueueAllowlistNamesItsVariable(t *testing.T) {
 }
 
 func TestEndpointAgentConfigNamesItsVariable(t *testing.T) {
-	t.Setenv(sroiaaaAgentConfigEnv, "")
+	t.Setenv(cassAgentConfigEnv, "")
 	plan := planFor(t, broker.RouteRequest{
 		Intent:   broker.IntentLiveEvidence,
 		Host:     "docker-harness",
@@ -236,7 +236,7 @@ func TestEndpointAgentConfigNamesItsVariable(t *testing.T) {
 	if err == nil {
 		t.Fatal("a live-evidence plan without endpoint configuration was accepted")
 	}
-	if !strings.Contains(err.Error(), sroiaaaAgentConfigEnv) {
+	if !strings.Contains(err.Error(), cassAgentConfigEnv) {
 		t.Errorf("the refusal must name the variable that fixes it; got %q", err)
 	}
 }

@@ -14,8 +14,8 @@ __pycache__/
 # Binaries a bare `go build ./cmd/...` drops in the repo root. The scripts here
 # build into runtime/, but an ad-hoc build does not, and `git add -A` will
 # happily commit 8MB of it.
-/sroiaaa-agent
-/sroiaaa-broker-exec
-/sroiaaa-broker-plan
-/sroiaaa-chat
-/sroiaaa-notify
+/cass-agent
+/cass-broker-exec
+/cass-broker-plan
+/cass-chat
+/cass-notify

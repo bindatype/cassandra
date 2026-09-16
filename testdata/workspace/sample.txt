@@ -1,2 +1,2 @@
-This is a sample workspace file for SROIAAA Phase One.
+This is a sample workspace file for Cass Phase One.
 It exists so filesystem.read and filesystem.list have stable fixture data.

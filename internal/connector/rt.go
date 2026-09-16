@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 const (
 	rtDefaultTimeout   = 20 * time.Second
 	rtMaxResponseBytes = 1 << 20
-	// rtSearchFields is every field SROIAAA will read from a ticket. Content,
+	// rtSearchFields is every field Cass will read from a ticket. Content,
 	// Transactions, and CustomFields are deliberately absent: RT tickets carry
 	// human correspondence, which routinely contains user PII and credentials
 	// pasted into a support request, and nothing here has decided that belongs
@@ -60,7 +60,7 @@ type RTConfig struct {
 	// than searching every queue an operator never reviewed.
 	Queues []string
 	// Location is the zone RT parses a bare date literal in. Defaults to the
-	// host's local zone, which is the right guess when RT and SROIAAA sit at
+	// host's local zone, which is the right guess when RT and Cass sit at
 	// the same institution, and is explicit here so a test can pin it and a
 	// reader can see there is an assumption at all.
 	Location         *time.Location
@@ -281,7 +281,7 @@ func rtDateBound(value string, loc *time.Location) (string, error) {
 	// submitted today" answered 21 against a true 22, missing one filed at
 	// 03:49 in the morning.
 	//
-	// RT and the host running SROIAAA are both America/New_York, and RT's half
+	// RT and the host running Cass are both America/New_York, and RT's half
 	// of that was measured rather than assumed. Ticket 111093, created
 	// 2026-01-10T06:30:07Z, matches Created > '2026-01-10 01:00:00' and not
 	// '2026-01-10 02:00:00', so RT read it as 01:30 local: offset -5 in

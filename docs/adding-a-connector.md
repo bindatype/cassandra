@@ -1,4 +1,4 @@
-# Adding a data source to SROIAAA
+# Adding a data source to Cassandra
 
 How Zabbix and Wazuh are wired in, what every connector must guarantee, and
 what to work through before integrating a new system. Written while adding the
@@ -52,7 +52,7 @@ is no default and no fallthrough.
 const (
 	SourceWazuhAPI       Source = "wazuh-api"
 	SourceZabbixAPI      Source = "zabbix-api"
-	SourceSROIAAA        Source = "sroiaaa-agent"
+	SourceCassandra        Source = "cass-agent"
 	SourceRequestTracker Source = "rt-api"     // new
 )
 
@@ -123,7 +123,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 
 ### 4. Wire configuration and credentials
 
-`cmd/sroiaaa-broker-exec/main.go` and `cmd/sroiaaa-chat/main.go`. Credentials
+`cmd/cass-broker-exec/main.go` and `cmd/cass-chat/main.go`. Credentials
 come from the environment; endpoints from a flag with an environment default.
 Build a connector only when the plan needs it, so an operator can run a Zabbix
 plan without holding RT credentials.

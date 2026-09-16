@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/broker"
-	"github.com/maclach/sroiaaa/internal/connector"
+	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/connector"
 )
 
 // fakeConnector stands in for a real data source so the loop can be tested
@@ -50,7 +50,7 @@ func TestSessionRunsFullLoop(t *testing.T) {
 		turns++
 		if turns == 1 {
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
-				{"id":"call_1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}
+				{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}
 			]}}]}`)
 			return
 		}
@@ -93,12 +93,12 @@ func TestSessionRunsFullLoop(t *testing.T) {
 func TestSessionDeniesUnauthorizedIntent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-			{"id":"call_1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"live.evidence\",\"host\":\"not-authorized\",\"resource\":\"system-log\"}"}}
+			{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"live.evidence\",\"host\":\"not-authorized\",\"resource\":\"system-log\"}"}}
 		]}}]}`)
 	}))
 	defer server.Close()
 
-	fake := &fakeConnector{source: broker.SourceSROIAAA}
+	fake := &fakeConnector{source: broker.SourceCass}
 	session := newTestSession(t, server.URL, fake)
 
 	if _, err := session.Ask(context.Background(), "read the log on not-authorized"); err == nil {
@@ -124,7 +124,7 @@ func TestSessionRejectsInventedToolArguments(t *testing.T) {
 	// rejected by strict decoding, not silently ignored.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-			{"id":"call_1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"fleet.inventory\",\"url\":\"https://evil.example/api\"}"}}
+			{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"fleet.inventory\",\"url\":\"https://evil.example/api\"}"}}
 		]}}]}`)
 	}))
 	defer server.Close()
@@ -176,7 +176,7 @@ func newTestSession(t *testing.T, endpoint string, c connector.Connector) *Sessi
 	policy, err := broker.LoadPolicy(strings.NewReader(`{
 		"version": 1,
 		"live_hosts": {"docker-harness": {"resources": ["system-log"]}},
-		"resources": {"system-log": {"operation": "filesystem.tail", "path": "/var/log/sroiaaa/system.log", "params": {"max_bytes": 8192}}}
+		"resources": {"system-log": {"operation": "filesystem.tail", "path": "/var/log/cass/system.log", "params": {"max_bytes": 8192}}}
 	}`))
 	if err != nil {
 		t.Fatalf("LoadPolicy() error = %v", err)
@@ -232,13 +232,13 @@ func TestSessionOffersOnlyExecutableIntents(t *testing.T) {
 }
 
 func TestLiveEvidenceIsWithheldUntilItsConnectorExists(t *testing.T) {
-	// There is no SROIAAA endpoint connector yet. Until there is, the intent
+	// There is no Cass endpoint connector yet. Until there is, the intent
 	// must not reach the model: the router would authorize it and execution
 	// would then fail with an internal error.
 	session := newTestSession(t, "http://unused.invalid", &fakeConnector{source: broker.SourceZabbixAPI})
 	for _, intent := range session.Intents() {
 		if intent == string(broker.IntentLiveEvidence) {
-			t.Fatal("live.evidence was offered with no sroiaaa-agent connector registered")
+			t.Fatal("live.evidence was offered with no cass-agent connector registered")
 		}
 	}
 }
@@ -276,11 +276,11 @@ func TestSessionRetriesOnceAfterAFailedExecution(t *testing.T) {
 		case 1:
 			// First attempt names a host the fake connector will reject.
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-				{"id":"c1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"broken\"}"}}]}}]}`)
+				{"id":"c1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"broken\"}"}}]}}]}`)
 		case 2:
 			// Shown the error, it corrects itself.
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-				{"id":"c2","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}]}}]}`)
+				{"id":"c2","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}]}}]}`)
 		default:
 			io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"node02 is disconnected."}}]}`)
 		}
@@ -324,10 +324,10 @@ func TestSessionCanLookBeforeItQueries(t *testing.T) {
 		switch turns {
 		case 1:
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-				{"id":"c1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"database.query\",\"query\":\"SELECT column_name FROM information_schema.columns\"}"}}]}}]}`)
+				{"id":"c1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"database.query\",\"query\":\"SELECT column_name FROM information_schema.columns\"}"}}]}}]}`)
 		case 2:
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-				{"id":"c2","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"database.query\",\"query\":\"SELECT shares FROM sshare_data LIMIT 5\"}"}}]}}]}`)
+				{"id":"c2","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"database.query\",\"query\":\"SELECT shares FROM sshare_data LIMIT 5\"}"}}]}}]}`)
 		default:
 			io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"sshare_data has 11 columns; here are the shares."}}]}`)
 		}
@@ -359,7 +359,7 @@ func TestSessionStopsAtTheTurnLimit(t *testing.T) {
 	// A model that never answers must not loop forever.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-			{"id":"c","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{"intent":"fleet.inventory"}"}}]}}]}`)
+			{"id":"c","type":"function","function":{"name":"cass_evidence","arguments":"{"intent":"fleet.inventory"}"}}]}}]}`)
 	}))
 	defer server.Close()
 
@@ -397,7 +397,7 @@ func TestAuditRecordsTheTranslationAndTheDenial(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-			{"id":"c1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"live.evidence\",\"host\":\"not-authorized\",\"resource\":\"system-log\"}"}}]}}]}`)
+			{"id":"c1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"live.evidence\",\"host\":\"not-authorized\",\"resource\":\"system-log\"}"}}]}}]}`)
 	}))
 	defer server.Close()
 
@@ -407,7 +407,7 @@ func TestAuditRecordsTheTranslationAndTheDenial(t *testing.T) {
 	}
 	defer auditor.Close()
 
-	session := newTestSession(t, server.URL, &fakeConnector{source: broker.SourceSROIAAA}).
+	session := newTestSession(t, server.URL, &fakeConnector{source: broker.SourceCass}).
 		WithAudit(auditor, "test-model")
 
 	if _, err := session.Ask(context.Background(), "read the log on not-authorized"); err == nil {
@@ -459,7 +459,7 @@ func TestSessionPushesBackWhenACallIsDescribedNotMade(t *testing.T) {
 		}
 		if turns == 2 {
 			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
-				{"id":"c1","type":"function","function":{"name":"sroiaaa_evidence","arguments":"{\"intent\":\"fleet.inventory\"}"}}]}}]}`)
+				{"id":"c1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"fleet.inventory\"}"}}]}}]}`)
 			return
 		}
 		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"275 agents, 52 disconnected."}}]}`)

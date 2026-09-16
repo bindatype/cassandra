@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/agent"
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/agent"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
-func TestSROIAAAConnectorExecutesOnlyTheApprovedStep(t *testing.T) {
+func TestCassConnectorExecutesOnlyTheApprovedStep(t *testing.T) {
 	root := t.TempDir()
 	logPath := filepath.Join(root, "system.log")
 	if err := os.WriteFile(logPath, []byte("first line\nlast line\n"), 0o600); err != nil {
@@ -35,9 +35,9 @@ func TestSROIAAAConnectorExecutesOnlyTheApprovedStep(t *testing.T) {
 	server := httptest.NewServer(agent.NewHandler(agent.NewService(cfg, auditor), cfg))
 	defer server.Close()
 
-	connector := newTestSROIAAA(t, server.URL)
+	connector := newTestCass(t, server.URL)
 	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
-		Source:    broker.SourceSROIAAA,
+		Source:    broker.SourceCass,
 		Action:    "operations.execute",
 		Host:      "sgtstubby.arc.gwu.edu",
 		Operation: "filesystem.tail",
@@ -47,7 +47,7 @@ func TestSROIAAAConnectorExecutesOnlyTheApprovedStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if evidence.Source != string(broker.SourceSROIAAA) || evidence.Action != "operations.execute" {
+	if evidence.Source != string(broker.SourceCass) || evidence.Action != "operations.execute" {
 		t.Errorf("provenance = %s %s", evidence.Source, evidence.Action)
 	}
 	if !evidence.Truncated {
@@ -71,10 +71,10 @@ func (a *recordingAgentAuditor) Record(event agent.AuditEvent) error {
 	return nil
 }
 
-func TestSROIAAAConnectorRefusesAnUnconfiguredHost(t *testing.T) {
-	connector := newTestSROIAAA(t, "http://127.0.0.1:8080")
+func TestCassConnectorRefusesAnUnconfiguredHost(t *testing.T) {
+	connector := newTestCass(t, "http://127.0.0.1:8080")
 	_, err := connector.Execute(context.Background(), broker.RouteStep{
-		Source:    broker.SourceSROIAAA,
+		Source:    broker.SourceCass,
 		Action:    "operations.execute",
 		Host:      "other.example.edu",
 		Operation: "filesystem.read",
@@ -85,7 +85,7 @@ func TestSROIAAAConnectorRefusesAnUnconfiguredHost(t *testing.T) {
 	}
 }
 
-func TestSROIAAAConnectorDoesNotFollowRedirects(t *testing.T) {
+func TestCassConnectorDoesNotFollowRedirects(t *testing.T) {
 	redirected := false
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirected = true
@@ -99,8 +99,8 @@ func TestSROIAAAConnectorDoesNotFollowRedirects(t *testing.T) {
 	}))
 	defer redirector.Close()
 
-	connector := newTestSROIAAA(t, redirector.URL)
-	_, err := connector.Execute(context.Background(), validSROIAAAStep())
+	connector := newTestCass(t, redirector.URL)
+	_, err := connector.Execute(context.Background(), validCassStep())
 	if err == nil || !strings.Contains(err.Error(), "agent_error") {
 		t.Fatalf("error = %v, want redirect refusal", err)
 	}
@@ -109,14 +109,14 @@ func TestSROIAAAConnectorDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
-func TestSROIAAAConnectorRejectsUnsafeEndpoints(t *testing.T) {
+func TestCassConnectorRejectsUnsafeEndpoints(t *testing.T) {
 	for _, endpoint := range []string{
 		"http://agent.example.edu:8080",
 		"https://agent.example.edu/v1/operations",
 		"https://agent.example.edu/?override=true",
 	} {
 		t.Run(endpoint, func(t *testing.T) {
-			_, err := NewSROIAAAConnector(SROIAAAConfig{Agents: map[string]SROIAAAAgentConfig{
+			_, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
 				"sgtstubby.arc.gwu.edu": {Endpoint: endpoint, Token: "token"},
 			}})
 			if err == nil {
@@ -126,27 +126,27 @@ func TestSROIAAAConnectorRejectsUnsafeEndpoints(t *testing.T) {
 	}
 }
 
-func TestParseSROIAAAAgentsRejectsUnknownFields(t *testing.T) {
-	_, err := ParseSROIAAAAgents(`{"sgtstubby.arc.gwu.edu":{"endpoint":"https://agent.example.edu","token":"t","extra":true}}`)
+func TestParseCassAgentsRejectsUnknownFields(t *testing.T) {
+	_, err := ParseCassAgents(`{"sgtstubby.arc.gwu.edu":{"endpoint":"https://agent.example.edu","token":"t","extra":true}}`)
 	if err == nil {
 		t.Fatal("unknown configuration field was accepted")
 	}
 }
 
-func newTestSROIAAA(t *testing.T, endpoint string) *SROIAAAConnector {
+func newTestCass(t *testing.T, endpoint string) *CassConnector {
 	t.Helper()
-	connector, err := NewSROIAAAConnector(SROIAAAConfig{Agents: map[string]SROIAAAAgentConfig{
+	connector, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
 		"sgtstubby.arc.gwu.edu": {Endpoint: endpoint, Token: "endpoint-token"},
 	}})
 	if err != nil {
-		t.Fatalf("NewSROIAAAConnector() error = %v", err)
+		t.Fatalf("NewCassConnector() error = %v", err)
 	}
 	return connector
 }
 
-func validSROIAAAStep() broker.RouteStep {
+func validCassStep() broker.RouteStep {
 	return broker.RouteStep{
-		Source:    broker.SourceSROIAAA,
+		Source:    broker.SourceCass,
 		Action:    "operations.execute",
 		Host:      "sgtstubby.arc.gwu.edu",
 		Operation: "filesystem.read",
@@ -155,7 +155,7 @@ func validSROIAAAStep() broker.RouteStep {
 	}
 }
 
-// TestSROIAAAEvidenceCarriesComputedCounts pins the rule every other connector
+// TestCassEvidenceCarriesComputedCounts pins the rule every other connector
 // already follows: a population figure is computed here, in code, never left
 // for a model to tally off the rows.
 //
@@ -164,7 +164,7 @@ func validSROIAAAStep() broker.RouteStep {
 // an operator asked for -- but it reached the model as a raw array alongside a
 // prompt rule forbidding the model to count arrays, which leaves no way to
 // answer "how many" that is not either a refusal or a violation.
-func TestSROIAAAEvidenceCarriesComputedCounts(t *testing.T) {
+func TestCassEvidenceCarriesComputedCounts(t *testing.T) {
 	tests := []struct {
 		operation string
 		data      map[string]any
@@ -200,10 +200,10 @@ func TestSROIAAAEvidenceCarriesComputedCounts(t *testing.T) {
 	}
 }
 
-// TestSROIAAACountsAreMeasuredNotBelieved asserts the agent's own figure is
+// TestCassCountsAreMeasuredNotBelieved asserts the agent's own figure is
 // checked rather than copied. An agent that miscounts is a defect worth
 // naming, and copying its number would launder that defect into evidence.
-func TestSROIAAACountsAreMeasuredNotBelieved(t *testing.T) {
+func TestCassCountsAreMeasuredNotBelieved(t *testing.T) {
 	summary, _, warnings := summarizeAgentData("process.list", map[string]any{
 		"processes": []any{map[string]any{"pid": 1}, map[string]any{"pid": 2}},
 		"count":     float64(97),
@@ -219,11 +219,11 @@ func TestSROIAAACountsAreMeasuredNotBelieved(t *testing.T) {
 	}
 }
 
-// TestSROIAAAUncountableDataWarns asserts that evidence supporting no
+// TestCassUncountableDataWarns asserts that evidence supporting no
 // population claim says so. A count that was never computed is not zero, and
 // every mechanism in this project that expressed that by omission has been
 // read the reassuring way.
-func TestSROIAAAUncountableDataWarns(t *testing.T) {
+func TestCassUncountableDataWarns(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		operation string
@@ -242,11 +242,11 @@ func TestSROIAAAUncountableDataWarns(t *testing.T) {
 	}
 }
 
-// TestSROIAAAKeepsHostsIsolated asserts the property the per-host token design
+// TestCassKeepsHostsIsolated asserts the property the per-host token design
 // exists for: a step for one host reaches that host's endpoint with that
 // host's token, and never another's. Every other test here configures a single
 // agent, so the claim in Execute's comment had nothing behind it.
-func TestSROIAAAKeepsHostsIsolated(t *testing.T) {
+func TestCassKeepsHostsIsolated(t *testing.T) {
 	type seen struct{ auth, path string }
 	got := map[string]seen{}
 
@@ -262,7 +262,7 @@ func TestSROIAAAKeepsHostsIsolated(t *testing.T) {
 	defer alpha.Close()
 	defer beta.Close()
 
-	rt, err := NewSROIAAAConnector(SROIAAAConfig{Agents: map[string]SROIAAAAgentConfig{
+	rt, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
 		"alpha.example.edu": {Endpoint: alpha.URL, Token: "token-for-alpha"},
 		"beta.example.edu":  {Endpoint: beta.URL, Token: "token-for-beta"},
 	}})
@@ -280,7 +280,7 @@ func TestSROIAAAKeepsHostsIsolated(t *testing.T) {
 			delete(got, k)
 		}
 		step := broker.RouteStep{
-			Source: broker.SourceSROIAAA, Action: "operations.execute",
+			Source: broker.SourceCass, Action: "operations.execute",
 			Host: host, Operation: "filesystem.list",
 			Target: &broker.OperationTarget{Path: "/workspace"},
 		}

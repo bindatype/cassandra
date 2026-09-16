@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/maclach/sroiaaa/internal/agent"
+	"github.com/bindatype/cassandra/internal/agent"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	service := agent.NewService(cfg, auditor)
 	server := newHTTPServer(cfg, agent.NewHandler(service, cfg))
 
-	log.Printf("sroiaaa-agent listening on %s", cfg.BindAddr)
+	log.Printf("cass-agent listening on %s", cfg.BindAddr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("listen: %v", err)
 	}

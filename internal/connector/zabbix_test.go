@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 func TestZabbixConnectorNormalizesTriggers(t *testing.T) {

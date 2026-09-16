@@ -13,41 +13,41 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maclach/sroiaaa/internal/broker"
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 const (
-	sroiaaaDefaultTimeout   = 20 * time.Second
-	sroiaaaMaxResponseBytes = 128 << 10
+	cassDefaultTimeout   = 20 * time.Second
+	cassMaxResponseBytes = 128 << 10
 )
 
-// SROIAAAAgentConfig is one endpoint agent an operator has explicitly made
+// CassAgentConfig is one endpoint agent an operator has explicitly made
 // reachable. Host is the broker-policy name, not a DNS name selected by a
 // route plan.
-type SROIAAAAgentConfig struct {
+type CassAgentConfig struct {
 	Endpoint string `json:"endpoint"`
 	Token    string `json:"token"`
 }
 
-// SROIAAAConfig maps every permitted policy host to its endpoint and its own
+// CassConfig maps every permitted policy host to its endpoint and its own
 // bearer token. Keeping the map in operator configuration prevents a route
 // plan from selecting either a network destination or another host's token.
-type SROIAAAConfig struct {
-	Agents           map[string]SROIAAAAgentConfig
+type CassConfig struct {
+	Agents           map[string]CassAgentConfig
 	Timeout          time.Duration
 	MaxResponseBytes int64
 }
 
-// ParseSROIAAAAgents reads the value of SROIAAA_AGENT_CONFIG. It intentionally
+// ParseCassAgents reads the value of SROIAAA_AGENT_CONFIG. It intentionally
 // keeps endpoint and token together per host: a single shared token would make
 // one endpoint credential authority for every configured agent.
-func ParseSROIAAAAgents(value string) (map[string]SROIAAAAgentConfig, error) {
+func ParseCassAgents(value string) (map[string]CassAgentConfig, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, fmt.Errorf("agent configuration is empty")
 	}
 	decoder := json.NewDecoder(strings.NewReader(value))
 	decoder.DisallowUnknownFields()
-	var agents map[string]SROIAAAAgentConfig
+	var agents map[string]CassAgentConfig
 	if err := decoder.Decode(&agents); err != nil {
 		return nil, fmt.Errorf("decode agent configuration: %w", err)
 	}
@@ -69,19 +69,19 @@ type configuredAgent struct {
 	token    string
 }
 
-// SROIAAAConnector executes broker-approved operations against the endpoint
+// CassConnector executes broker-approved operations against the endpoint
 // agent. The broker has already fixed operation, path, and limits; this
 // connector's job is only to bind that step to the configured host endpoint.
-type SROIAAAConnector struct {
+type CassConnector struct {
 	agents           map[string]configuredAgent
 	maxResponseBytes int64
 	client           *http.Client
 }
 
-// NewSROIAAAConnector validates operator configuration before accepting any
+// NewCassConnector validates operator configuration before accepting any
 // plan. HTTP is allowed only for loopback development agents; a remotely
 // reachable endpoint must use HTTPS.
-func NewSROIAAAConnector(config SROIAAAConfig) (*SROIAAAConnector, error) {
+func NewCassConnector(config CassConfig) (*CassConnector, error) {
 	if len(config.Agents) == 0 {
 		return nil, fmt.Errorf("at least one endpoint agent is required")
 	}
@@ -94,7 +94,7 @@ func NewSROIAAAConnector(config SROIAAAConfig) (*SROIAAAConnector, error) {
 		if strings.TrimSpace(agent.Token) == "" {
 			return nil, fmt.Errorf("endpoint agent %q token is required", host)
 		}
-		endpoint, err := validateSROIAAAEndpoint(host, agent.Endpoint)
+		endpoint, err := validateCassEndpoint(host, agent.Endpoint)
 		if err != nil {
 			return nil, err
 		}
@@ -103,14 +103,14 @@ func NewSROIAAAConnector(config SROIAAAConfig) (*SROIAAAConnector, error) {
 
 	timeout := config.Timeout
 	if timeout <= 0 {
-		timeout = sroiaaaDefaultTimeout
+		timeout = cassDefaultTimeout
 	}
 	maxBytes := config.MaxResponseBytes
 	if maxBytes <= 0 {
-		maxBytes = sroiaaaMaxResponseBytes
+		maxBytes = cassMaxResponseBytes
 	}
 
-	return &SROIAAAConnector{
+	return &CassConnector{
 		agents:           agents,
 		maxResponseBytes: maxBytes,
 		// An agent controls its HTTP response, not the broker's destination.
@@ -124,7 +124,7 @@ func NewSROIAAAConnector(config SROIAAAConfig) (*SROIAAAConnector, error) {
 	}, nil
 }
 
-func validateSROIAAAEndpoint(host, value string) (string, error) {
+func validateCassEndpoint(host, value string) (string, error) {
 	if strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("endpoint agent %q endpoint is required", host)
 	}
@@ -153,8 +153,8 @@ func isLoopbackHost(host string) bool {
 }
 
 // Source reports which route-step source this connector serves.
-func (c *SROIAAAConnector) Source() broker.Source {
-	return broker.SourceSROIAAA
+func (c *CassConnector) Source() broker.Source {
+	return broker.SourceCass
 }
 
 type agentOperationRequest struct {
@@ -179,12 +179,12 @@ type agentOperationResponse struct {
 
 // Execute sends only the policy-derived operation, target, and limits to the
 // endpoint. A plan for one configured host cannot be sent to another.
-func (c *SROIAAAConnector) Execute(ctx context.Context, step broker.RouteStep) (Evidence, error) {
-	if step.Source != broker.SourceSROIAAA {
-		return Evidence{}, newConnectorError("wrong_source", "step is not a sroiaaa-agent step")
+func (c *CassConnector) Execute(ctx context.Context, step broker.RouteStep) (Evidence, error) {
+	if step.Source != broker.SourceCass {
+		return Evidence{}, newConnectorError("wrong_source", "step is not a cass-agent step")
 	}
 	if step.Action != "operations.execute" || step.Operation == "" || step.Target == nil {
-		return Evidence{}, newConnectorError("invalid_step", "sroiaaa-agent step must contain a policy-approved operation and target")
+		return Evidence{}, newConnectorError("invalid_step", "cass-agent step must contain a policy-approved operation and target")
 	}
 	agent, ok := c.agents[step.Host]
 	if !ok {
@@ -255,7 +255,7 @@ func (c *SROIAAAConnector) Execute(ctx context.Context, step broker.RouteStep) (
 	}
 
 	return Evidence{
-		Source:      string(broker.SourceSROIAAA),
+		Source:      string(broker.SourceCass),
 		Action:      step.Action,
 		Endpoint:    redactEndpoint(agent.endpoint),
 		RequestedAt: requestedAt,

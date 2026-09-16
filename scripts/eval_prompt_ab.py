@@ -20,7 +20,7 @@ computes the aggregates and warnings, does the prompt still earn its added
 length, or does the richer evidence carry the model on its own?
 
 The cases are the reassuring failures -- the ones where a wrong answer reads as
-good news. A prompt rule that only helps on questions SROIAAA already answered
+good news. A prompt rule that only helps on questions Cass already answered
 well is not worth 24 lines of a budget with 9.7 KB of headroom.
 
 Ground truth is computed live, immediately before each run, because these

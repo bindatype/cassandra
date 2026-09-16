@@ -272,7 +272,7 @@ func (r *Router) planLiveEvidence(request RouteRequest) (RoutePlan, error) {
 
 	allowedResources, ok := r.liveHosts[request.Host]
 	if !ok {
-		return RoutePlan{}, newRouteError("host_not_authorized", "host is not authorized for live SROIAAA access")
+		return RoutePlan{}, newRouteError("host_not_authorized", "host is not authorized for live Cass access")
 	}
 	if _, ok := allowedResources[request.Resource]; !ok {
 		return RoutePlan{}, newRouteError("resource_not_authorized", "resource is not authorized for this host")
@@ -280,7 +280,7 @@ func (r *Router) planLiveEvidence(request RouteRequest) (RoutePlan, error) {
 	resource := r.resources[request.Resource]
 
 	step := RouteStep{
-		Source:    SourceSROIAAA,
+		Source:    SourceCass,
 		Action:    "operations.execute",
 		Host:      request.Host,
 		Operation: resource.Operation,

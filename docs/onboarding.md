@@ -1,6 +1,6 @@
 # Onboarding a contributor
 
-For a second developer joining SROIAAA to add an API connector. Covers
+For a second developer joining Cassandra to add an API connector. Covers
 accounts, environment, the git workflow, and how two people add sources to
 the same broker without stepping on each other.
 
@@ -43,8 +43,8 @@ partners working closely, collaborator access and shared branches is
 simpler than forks and avoids a round trip on every change.
 
 ```bash
-git clone https://github.com/bindatype/SROIAAA.git
-cd SROIAAA
+git clone https://github.com/bindatype/Cassandra.git
+cd Cassandra
 go test ./...
 ```
 
@@ -148,7 +148,7 @@ model: gemma4-31b-vllm   subject host: dss01
   ...
 ===== gemma4-31b-vllm: 6/6 passed, avg 5.4s =====
 
-report written to /home/you/SROIAAA/runtime/eval-zabbix.md
+report written to /home/you/Cassandra/runtime/eval-zabbix.md
 ```
 
 **Where the output goes.** Every evaluation prints to your terminal *and*
@@ -230,7 +230,7 @@ environment before you believe it.
 Model selection is, in descending precedence: the per-call `-model` flag,
 `SROIAAA_MODEL`, then the compiled fallback **`gemma4-31b-vllm`**. A deployment
 should set `SROIAAA_MODEL` to a MindRouter role alias such as `default-agent`;
-that lets the gateway change the backing model without rebuilding SROIAAA.
+that lets the gateway change the backing model without rebuilding Cassandra.
 Use `-model` to try a challenger without changing the deployment default.
 
 The evaluation harnesses resolve the same way, through
@@ -286,7 +286,7 @@ tokens whatever its native context, and the prompt travels alongside up to
 headroom**, for prompt growth *or* evidence, not both. `make test` fails if
 you exceed it.
 
-Read `SROIAAA-model-evaluation-results.md` in the Obsidian vault before
+Read `Cassandra-model-evaluation-results.md` in the Obsidian vault before
 running one. It documents four ways these harnesses have already produced
 confidently wrong numbers — stale ground truth, collapsed grading dimensions,
 a baseline that could not express the thing being measured, and a grader that
@@ -298,7 +298,7 @@ fixes and was found by someone else.
 the one file in this project that grows by accretion, because each rule is
 added on the day some answer was wrong and nothing ever forces a second look.
 So a new rule needs one of two things before it lands: an eval case that
-targets it, or a line in `SROIAAA-prompt-change-log.md` saying it is unmeasured
+targets it, or a line in `Cassandra-prompt-change-log.md` saying it is unmeasured
 and why it is being kept anyway. Both are acceptable. Silence is not, because a
 prompt where proven guardrails and remembered folklore look identical cannot be
 trimmed by anyone who was not there.
@@ -335,8 +335,8 @@ ones surface disagreements before you have written much:
    point the intent can be authorized and denied but nothing executes.
 3. **Implement the connector** in `internal/connector/<source>.go`, with
    tests against `httptest`. No network, no credentials.
-4. **Wire configuration** into `cmd/sroiaaa-broker-exec` and
-   `cmd/sroiaaa-chat`.
+4. **Wire configuration** into `cmd/cass-broker-exec` and
+   `cmd/cass-chat`.
 5. **Expose the intent** to the model in `internal/orchestrator/session.go`
    — the tool schema enum and the system prompt, including what the intent
    does *not* cover.
@@ -355,7 +355,7 @@ four are registration points:
 |---|---|---|
 | `internal/broker/types.go` | a `Source` and `Intent` constant | low, adjacent lines |
 | `internal/broker/router.go` | a `case` in `Plan()` | low, adjacent cases |
-| `cmd/sroiaaa-broker-exec/main.go` | a block in `buildConnectors` | low |
+| `cmd/cass-broker-exec/main.go` | a block in `buildConnectors` | low |
 | `internal/orchestrator/session.go` | an enum entry and prompt text | **moderate**, the prompt is prose |
 
 The conflicts are mechanical rather than semantic — both sides are adding

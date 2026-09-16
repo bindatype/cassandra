@@ -1,8 +1,8 @@
 #!/bin/sh
-# Ask SROIAAA a set of Zabbix questions chosen so that a wrong answer is
+# Ask Cass a set of Zabbix questions chosen so that a wrong answer is
 # reassuring rather than obviously broken.
 #
-# The useful ones are not the questions SROIAAA answers well. They are the ones
+# The useful ones are not the questions Cass answers well. They are the ones
 # where the plausible failure reads as good news: an empty window mistaken for a
 # healthy fleet, a page mistaken for a population, a row count mistaken for a
 # machine count. Each case below prints what to look for, so the answer can be
@@ -61,8 +61,8 @@ BIN=${SROIAAA_BIN:-"$ROOT/runtime"}
 # working directory, so `go run` failed outright from anywhere but the
 # repository root, and it recompiled for each of the nine cases when it worked.
 mkdir -p "$BIN"
-(cd "$ROOT" && go build -o "$BIN/sroiaaa-chat" ./cmd/sroiaaa-chat)
-CHAT="$BIN/sroiaaa-chat -policy $POLICY -wazuh-insecure"
+(cd "$ROOT" && go build -o "$BIN/cass-chat" ./cmd/cass-chat)
+CHAT="$BIN/cass-chat -policy $POLICY -wazuh-insecure"
 
 filter="${1:-}"
 echo "$cases" | while IFS='|' read -r id question good bad; do

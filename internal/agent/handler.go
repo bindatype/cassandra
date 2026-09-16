@@ -43,7 +43,7 @@ func (h *Handler) requireBearerAuth(next http.Handler) http.Handler {
 		token, ok := bearerToken(r.Header.Get("Authorization"))
 		callerID, authenticated := h.authenticateToken(token)
 		if !ok || !authenticated {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="sroiaaa"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="cass"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"status": "error",
 				"error": map[string]string{

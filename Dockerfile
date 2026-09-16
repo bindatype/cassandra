@@ -7,14 +7,14 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/sroiaaa-agent ./cmd/sroiaaa-agent
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/cass-agent ./cmd/cass-agent
 
 FROM alpine:3.22
 
-RUN addgroup -S sroiaaa && adduser -S -G sroiaaa -u 10001 sroiaaa
+RUN addgroup -S cass && adduser -S -G cass -u 10001 cass
 WORKDIR /app
-COPY --from=build /out/sroiaaa-agent /usr/local/bin/sroiaaa-agent
-USER sroiaaa
+COPY --from=build /out/cass-agent /usr/local/bin/cass-agent
+USER cass
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/sroiaaa-agent"]
+ENTRYPOINT ["/usr/local/bin/cass-agent"]

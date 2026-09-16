@@ -11,8 +11,8 @@
 set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-PREFIX=$(mktemp -d "${TMPDIR:-/tmp}/sroiaaa-entrypoints.XXXXXX")
-ENVDIR=$(mktemp -d "${TMPDIR:-/tmp}/sroiaaa-env.XXXXXX")
+PREFIX=$(mktemp -d "${TMPDIR:-/tmp}/cass-entrypoints.XXXXXX")
+ENVDIR=$(mktemp -d "${TMPDIR:-/tmp}/cass-env.XXXXXX")
 trap 'rm -rf "$PREFIX" "$ENVDIR"' EXIT INT TERM
 
 failures=0
