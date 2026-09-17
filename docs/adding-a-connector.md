@@ -52,7 +52,7 @@ is no default and no fallthrough.
 const (
 	SourceWazuhAPI       Source = "wazuh-api"
 	SourceZabbixAPI      Source = "zabbix-api"
-	SourceCassandra        Source = "cass-agent"
+	SourceCass           Source = "cass-agent"
 	SourceRequestTracker Source = "rt-api"     // new
 )
 

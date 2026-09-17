@@ -148,7 +148,7 @@ model: gemma4-31b-vllm   subject host: dss01
   ...
 ===== gemma4-31b-vllm: 6/6 passed, avg 5.4s =====
 
-report written to /home/you/Cassandra/runtime/eval-zabbix.md
+report written to /home/you/cassandra/runtime/eval-zabbix.md
 ```
 
 **Where the output goes.** Every evaluation prints to your terminal *and*
