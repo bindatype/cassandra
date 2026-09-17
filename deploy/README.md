@@ -89,3 +89,48 @@ rm -f /etc/systemd/system/cassd.service /usr/local/bin/cassd
 rm -rf /etc/cassd /var/lib/cassd
 systemctl daemon-reload
 ```
+
+## The tunnel to winston
+
+`cassd` on a remote host binds its own loopback and is reached through an SSH
+forward, so the connector still sees `http://127.0.0.1:<port>` and the
+`https`-unless-loopback rule is satisfied by a transport SSH has already
+encrypted and authenticated.
+
+`deploy/cassd-tunnel-winston.service` is that forward. Install it on the broker
+host:
+
+```sh
+install -o root -g root -m 0644 \
+  /home/glenamac/dev/cassandra/deploy/cassd-tunnel-winston.service \
+  /etc/systemd/system/cassd-tunnel-winston.service
+systemctl daemon-reload && systemctl enable --now cassd-tunnel-winston
+```
+
+The key it uses must be restricted on the far host, in `~/.ssh/authorized_keys`:
+
+```
+restrict,port-forwarding,command="/bin/false",permitopen="127.0.0.1:8099" ssh-ed25519 AAAA...
+```
+
+All four options matter and one of them is easy to get wrong. `restrict` turns
+everything off. **`permitopen` narrows forwarding; it does not enable it** — so
+`restrict,permitopen=...` forwards nothing at all, and `port-forwarding` is
+what restores the capability that `permitopen` then constrains.
+`command="/bin/false"` closes the remaining gap, because `restrict` blocks PTY
+allocation but not command execution; `ssh -N` requests no session, so the
+forced command never runs and the forward is unaffected.
+
+### One port map, kept in two places
+
+The local port appears in this unit and again in `CASS_AGENT_CONFIG`. They can
+drift, and a transposed port means one host's filesystem returned under another
+host's name — an answer that parses, reads sensibly, and is false throughout.
+
+That is survivable only because the agent reports its own hostname on every
+response and the connector refuses a reply from anywhere but the host the plan
+named. Verified deliberately: pointing sgtstubby's entry at winston's forward
+produces a refusal naming both hosts, not an answer.
+
+At a third host, replace this unit with a template plus a per-host environment
+file rather than copying it again.

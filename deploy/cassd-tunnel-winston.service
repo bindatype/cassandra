@@ -1,0 +1,49 @@
+[Unit]
+Description=SSH forward to the Cassandra endpoint agent on winston
+Documentation=https://github.com/bindatype/cassandra
+# The forward is useless before the network is up, and Restart=always would
+# otherwise spend the first half-minute of every boot failing and backing off.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=glenamac
+Type=exec
+
+# StrictHostKeyChecking=yes is the load-bearing option here. This whole
+# transport is http-over-ssh rather than https, and what makes that defensible
+# is that SSH authenticates the far host. Accepting a changed key automatically
+# would remove the only thing standing in for a certificate -- so a changed key
+# must fail and keep failing, loudly, rather than reconnect to whatever is
+# now answering.
+#
+# ExitOnForwardFailure=yes so that a session which connects but cannot open the
+# forward dies and is restarted, instead of sitting there authenticated and
+# carrying nothing. Without it the unit reports active while every question
+# routed through it fails.
+#
+# ServerAlive* detects a peer that has gone away without closing the socket --
+# a rebooted host, a dropped route -- within about ninety seconds. A forward
+# that is dead but still bound is the failure this pair exists to shorten.
+ExecStart=/usr/bin/ssh -N \
+    -o BatchMode=yes \
+    -o IdentitiesOnly=yes \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -i /home/glenamac/.ssh/id_cass_tunnel \
+    -L 8101:127.0.0.1:8099 \
+    glenamac@winston.arc.gwu.edu
+
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target
