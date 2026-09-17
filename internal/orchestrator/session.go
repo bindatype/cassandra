@@ -140,9 +140,11 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 				"event log for a past window; a policy-approved file read from an authorized Cass endpoint; " +
 				"one read-only SQL SELECT against the pegasusdb HPC accounting database; and open Request " +
 				"Tracker tickets in allowlisted queues, metadata only. " +
-				"Does NOT cover vulnerabilities or CVEs, installed packages, patch level, log contents, user " +
-				"accounts, configuration, performance metrics or history, ticket content or correspondence, " +
-				"or any file outside the policy's resource list. " +
+				"Does NOT cover vulnerabilities or CVEs, user accounts, performance metrics or history, " +
+				"ticket content or correspondence, or any file outside the policy's resource list. " +
+				"Package history, patch level, log contents and configuration are covered ONLY where a " +
+				"policy resource names the file -- check the resource list before refusing them; if a " +
+				"resource exists for the question, use it. " +
 				"Do not call this for questions it cannot answer.",
 			"parameters": map[string]any{
 				"type": "object",
