@@ -11,14 +11,16 @@
       "resources": [
         "log-dir",
         "log-dir-metadata",
-        "patch-history"
+        "patch-history",
+        "host-facts"
       ]
     },
     "winston.arc.gwu.edu": {
       "resources": [
         "log-dir",
         "log-dir-metadata",
-        "patch-history"
+        "patch-history",
+        "host-facts"
       ]
     }
   },
@@ -54,6 +56,9 @@
       "params": {
         "max_bytes": 24576
       }
+    },
+    "host-facts": {
+      "operation": "host.info"
     }
   }
 }

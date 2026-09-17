@@ -184,7 +184,8 @@ func (c *CassConnector) Execute(ctx context.Context, step broker.RouteStep) (Evi
 	if step.Source != broker.SourceCass {
 		return Evidence{}, newConnectorError("wrong_source", "step is not a cass-agent step")
 	}
-	if step.Action != "operations.execute" || step.Operation == "" || step.Target == nil {
+	if step.Action != "operations.execute" || step.Operation == "" ||
+		(broker.OperationTakesTarget(step.Operation) && step.Target == nil) {
 		return Evidence{}, newConnectorError("invalid_step", "cass-agent step must contain a policy-approved operation and target")
 	}
 	agent, ok := c.agents[step.Host]

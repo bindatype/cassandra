@@ -629,3 +629,78 @@ func TestTicketAgeBoundStandsAlone(t *testing.T) {
 		})
 	}
 }
+
+// TestHostInfoIsRoutableWithoutAPath pins the shape that kept host.info
+// unreachable. Every routable operation addressed a file, so the path was
+// validated before the operation was looked at, and a resource with nothing to
+// name was rejected before its operation could be considered.
+func TestHostInfoIsRoutableWithoutAPath(t *testing.T) {
+	router, err := NewRouter(Policy{
+		Version:   1,
+		LiveHosts: map[string]HostPolicy{"h1": {Resources: []string{"facts"}}},
+		Resources: map[string]Resource{"facts": {Operation: "host.info"}},
+	})
+	if err != nil {
+		t.Fatalf("host.info with no path was rejected: %v", err)
+	}
+
+	plan, err := router.Plan(RouteRequest{Intent: IntentLiveEvidence, Host: "h1", Resource: "facts"})
+	if err != nil {
+		t.Fatalf("plan host.info: %v", err)
+	}
+	// No target, rather than an empty one. An OperationTarget{Path: ""} would
+	// travel to the agent as a target it must decide to ignore.
+	if plan.Steps[0].Target != nil {
+		t.Errorf("host.info step carried a target: %#v", plan.Steps[0].Target)
+	}
+}
+
+// TestHostInfoRejectsAPathRatherThanIgnoringIt: a silently discarded path
+// reads, to whoever wrote it, as a path being honoured.
+func TestHostInfoRejectsAPathRatherThanIgnoringIt(t *testing.T) {
+	_, err := NewRouter(Policy{
+		Version:   1,
+		LiveHosts: map[string]HostPolicy{"h1": {Resources: []string{"facts"}}},
+		Resources: map[string]Resource{"facts": {Operation: "host.info", Path: "/etc/hostname"}},
+	})
+	if err == nil {
+		t.Fatal("a path on host.info was accepted and would have been ignored")
+	}
+	if !strings.Contains(err.Error(), "addresses no path") {
+		t.Errorf("error does not say why: %v", err)
+	}
+}
+
+// TestFileOperationsStillRequireAPath guards the other direction: making the
+// path conditional must not have made it optional for everything.
+func TestFileOperationsStillRequireAPath(t *testing.T) {
+	for _, operation := range []string{"filesystem.list", "filesystem.stat", "filesystem.read", "filesystem.tail"} {
+		_, err := NewRouter(Policy{
+			Version:   1,
+			LiveHosts: map[string]HostPolicy{"h1": {Resources: []string{"r"}}},
+			Resources: map[string]Resource{"r": {
+				Operation: operation,
+				Params:    &OperationParams{MaxEntries: 10, MaxBytes: 1024},
+			}},
+		})
+		if err == nil {
+			t.Errorf("%s was accepted with no path", operation)
+		}
+	}
+}
+
+// TestUnroutableOperationSaysSo. Checking the path first meant an operation
+// the broker will never route was reported as a path problem.
+func TestUnroutableOperationSaysSo(t *testing.T) {
+	_, err := NewRouter(Policy{
+		Version:   1,
+		LiveHosts: map[string]HostPolicy{"h1": {Resources: []string{"r"}}},
+		Resources: map[string]Resource{"r": {Operation: "process.list"}},
+	})
+	if err == nil {
+		t.Fatal("process.list is implemented by the agent but must not be broker-routable")
+	}
+	if !strings.Contains(err.Error(), "not broker-routable") {
+		t.Errorf("misleading error for an unroutable operation: %v", err)
+	}
+}

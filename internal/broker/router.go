@@ -285,7 +285,9 @@ func (r *Router) planLiveEvidence(request RouteRequest) (RoutePlan, error) {
 		Action:    "operations.execute",
 		Host:      request.Host,
 		Operation: resource.Operation,
-		Target:    &OperationTarget{Path: resource.Path},
+	}
+	if OperationTakesTarget(resource.Operation) {
+		step.Target = &OperationTarget{Path: resource.Path}
 	}
 	if resource.Params != nil {
 		params := *resource.Params

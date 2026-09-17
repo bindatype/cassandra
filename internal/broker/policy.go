@@ -114,12 +114,37 @@ func validateHostSelector(host string) error {
 	return nil
 }
 
+// OperationTakesTarget reports whether a broker-routable operation addresses a
+// path.
+//
+// Every operation did, until host.info: it reports facts about the machine
+// rather than about a file, so there is nothing for a path to name. Keeping
+// that as one predicate rather than a condition repeated in three places is
+// deliberate -- validation, route construction and the connector each need to
+// know, and three copies of a list is how they come to disagree.
+func OperationTakesTarget(operation string) bool {
+	return operation != "host.info"
+}
+
 func validateResource(resource Resource) error {
-	if !filepath.IsAbs(resource.Path) {
-		return fmt.Errorf("path must be absolute")
+	// The operation is checked before the path, because the path rules depend
+	// on it and because "path must be absolute" is a confusing complaint about
+	// an operation that is not routable at all.
+	if !routableOperations[resource.Operation] {
+		return fmt.Errorf("operation %q is not broker-routable", resource.Operation)
 	}
-	if filepath.Clean(resource.Path) != resource.Path {
-		return fmt.Errorf("path must be canonical")
+
+	if OperationTakesTarget(resource.Operation) {
+		if !filepath.IsAbs(resource.Path) {
+			return fmt.Errorf("path must be absolute")
+		}
+		if filepath.Clean(resource.Path) != resource.Path {
+			return fmt.Errorf("path must be canonical")
+		}
+	} else if resource.Path != "" {
+		// Rejected rather than ignored. A path that is silently discarded
+		// reads, to whoever wrote it, as a path that is being honoured.
+		return fmt.Errorf("%s addresses no path; remove the path field", resource.Operation)
 	}
 
 	params := OperationParams{}
@@ -156,8 +181,26 @@ func validateResource(resource Resource) error {
 		if params.Offset != 0 || params.MaxEntries != 0 {
 			return fmt.Errorf("filesystem.tail accepts only max_bytes")
 		}
+	case "host.info":
+		// The fields it may report are the agent's own configuration
+		// (CASS_HOST_INFO_FIELDS), not the policy's to narrow, so there is
+		// nothing here to bound.
+		if params != (OperationParams{}) {
+			return fmt.Errorf("host.info does not accept parameters")
+		}
 	default:
 		return fmt.Errorf("operation %q is not broker-routable", resource.Operation)
 	}
 	return nil
+}
+
+// routableOperations is what a policy resource may ask an endpoint agent for.
+// The agent implements more -- process.list among them -- and implementing an
+// operation is not the same as exposing it through the broker.
+var routableOperations = map[string]bool{
+	"filesystem.list": true,
+	"filesystem.stat": true,
+	"filesystem.read": true,
+	"filesystem.tail": true,
+	"host.info":       true,
 }
