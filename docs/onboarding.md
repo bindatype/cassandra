@@ -27,7 +27,7 @@ Practically this means:
 - your own shell account on the runtime host
 - your own MindRouter API key, named for its purpose, so it can be revoked
   without affecting anyone else
-- your own `~/.config/sroiaaa/env`, mode `0600`
+- your own `~/.config/cass/env`, mode `0600`
 - your own GitHub account with collaborator access on the repository
 
 Shared *service* credentials such as a read-only monitoring account are a
@@ -58,9 +58,9 @@ Runtime configuration lives in a file you source explicitly. Never in
 `~/.bashrc`, never in the repository.
 
 ```bash
-mkdir -p ~/.config/sroiaaa && chmod 700 ~/.config/sroiaaa
+mkdir -p ~/.config/cass && chmod 700 ~/.config/cass
 umask 077
-cat > ~/.config/sroiaaa/env <<'ENVEOF'
+cat > ~/.config/cass/env <<'ENVEOF'
 # The model gateway. Needed by everything that asks a question.
 export MINDROUTER_API_KEY=...
 export CASS_MINDROUTER_ENDPOINT=http://localhost:8000
@@ -110,13 +110,13 @@ export NETBOX_RO_TOKEN=...
 # This deployment serves only its leaf certificate, so the chain cannot be
 # built from the system trust store. Pin the issuing intermediate rather than
 # disabling verification; see the NetBox Interaction Guide for how to fetch it.
-export CASS_NETBOX_CACERT=$HOME/.config/sroiaaa/netbox-ca.pem
+export CASS_NETBOX_CACERT=$HOME/.config/cass/netbox-ca.pem
 
 # Where each answered question is recorded. Yours, not shared.
-export CASS_BROKER_AUDIT=$HOME/.local/share/sroiaaa/broker-audit.jsonl
+export CASS_BROKER_AUDIT=$HOME/.local/share/cass/broker-audit.jsonl
 ENVEOF
-chmod 600 ~/.config/sroiaaa/env
-mkdir -p ~/.local/share/sroiaaa
+chmod 600 ~/.config/cass/env
+mkdir -p ~/.local/share/cass
 ```
 
 Ask for the real values rather than copying them out of someone's shell
@@ -134,7 +134,7 @@ values lived in `~/.bashrc`, which `cron` does not read.
 ### 3. Verify end to end
 
 ```bash
-source ~/.config/sroiaaa/env
+source ~/.config/cass/env
 make eval-zabbix
 ```
 

@@ -2,7 +2,7 @@
 """Exercise the Zabbix monitoring plane through the full chat loop.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_zabbix.py [model]
 
 Covers both shapes the broker's single Zabbix intent supports, scoped and

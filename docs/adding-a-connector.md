@@ -270,7 +270,7 @@ metadata only -- subject, queue, status, owner, dates -- with body text
 excluded unless there is a specific decision to include it.
 
 **What is the credential and its scope?** Prefer a dedicated read-only account,
-as with `rts_wazuh_api_ro`. Store it in `~/.config/sroiaaa/env`, mode `0600`,
+as with `rts_wazuh_api_ro`. Store it in `~/.config/cass/env`, mode `0600`,
 with an explicit `export`. A value set in `~/.bashrc` but not exported is
 invisible to child processes; this has cost time on three separate occasions.
 

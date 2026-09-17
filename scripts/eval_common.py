@@ -41,6 +41,26 @@ def env_value(name):
     return ""
 
 
+def config_path(name):
+    """Path to a configuration file, preferring ~/.config/cass.
+
+    The shell scripts got this fallback when config moved; the harnesses did
+    not, and two of them went on naming ~/.config/sroiaaa/policy.json directly
+    -- a path that stopped existing the morning the host was migrated. See
+    cass_config_path in bin/lib/config.sh, which this mirrors.
+
+    Returns the NEW path when neither exists, so a failure names where the file
+    should be rather than where it used to be.
+    """
+    new = os.path.expanduser(os.path.join("~/.config/cass", name))
+    if os.path.exists(new):
+        return new
+    old = os.path.expanduser(os.path.join("~/.config/sroiaaa", name))
+    if os.path.exists(old):
+        return old
+    return new
+
+
 def default_model():
     for name in ("CASS_EVAL_MODEL", "EVAL_MODEL", "CASS_MODEL"):
         value = env_value(name)

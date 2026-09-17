@@ -2,7 +2,7 @@
 """Measure one rule: does leading with the failure actually change the lead?
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_lead.py [model]
     RUNS=15 python3 scripts/eval_lead.py            # uses $CASS_MODEL
     RUNS=15 python3 scripts/eval_lead.py gemma4-31b-vllm
@@ -40,7 +40,7 @@ the thing being measured:
 import datetime, json, os, ssl, subprocess, sys, time, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from eval_common import (build_chat, default_model, first_sentence, normalize,
+from eval_common import (config_path, build_chat, default_model, first_sentence, normalize,
                         require_env, write_report)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -125,7 +125,7 @@ def ask(binary, model, prompt_path, question):
 
 
 def policy_path():
-    deployed = os.path.expanduser("~/.config/sroiaaa/policy.json")
+    deployed = config_path("policy.json")
     return deployed if os.path.exists(deployed) else os.path.join(
         ROOT, "configs", "broker-policy.example.json")
 

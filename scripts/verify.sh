@@ -165,6 +165,15 @@ fi
 # This fails on any OTHER spelling of the old name, so the compatibility shims
 # stay visible and deliberate while typos and leftovers do not.
 #
+# Nothing is excused by SPELLING any more, only by file. The variable names
+# were excused by spelling first and the README taught them for a whole rename;
+# the config paths were excused by spelling second, and the README went on
+# telling people to run `source ~/.config/sroiaaa/env` -- alongside two
+# evaluation harnesses naming ~/.config/sroiaaa/policy.json outright, which
+# stopped existing the morning the host was migrated. The same gap twice, so
+# the rule is now that only the files implementing a fallback may mention the
+# old name at all.
+#
 # The SROIAAA_ variable names are NOT globally excused. They were, and the
 # README went on teaching an operator to export SROIAAA_BIND_ADDR and
 # SROIAAA_AUTH_TOKEN for the whole of the rename -- each one matched an
@@ -179,7 +188,6 @@ fi
 # goes empty and this check covers the whole tree.
 oldname=$(git ls-files -z 2>/dev/null |
 	xargs -0 grep -inE "sroiaaa" 2>/dev/null |
-	grep -viE "\.config/sroiaaa|\.local/(state|share)/sroiaaa|sroiaaa/(env|policy)" |
 	grep -vE "^(scripts/verify\.sh|internal/env/env(_test)?\.go|bin/lib/config\.sh|bin/askcass|bin/netbox-probe\.sh|bin/zabbix-probe\.sh|scripts/ctx_marker_probe\.py|scripts/eval_common\.py):" |
 	cut -d: -f1,2 || true)
 if [ -z "$oldname" ]; then

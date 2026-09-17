@@ -2,7 +2,7 @@
 """Find which prompt rules a given model actually needs.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_ablate.py [model]
 
 The prompt grew by accretion: nearly every rule was added because some model

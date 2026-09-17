@@ -303,7 +303,7 @@ does not expand broker authority.
 A question in natural language, answered from live evidence:
 
 ```bash
-source ~/.config/sroiaaa/env
+source ~/.config/cass/env
 go run ./cmd/cass-chat \
   -policy ./configs/broker-policy.example.json \
   -wazuh-insecure \
@@ -423,9 +423,9 @@ Credentials live in a file that is sourced explicitly, never in the
 repository:
 
 ```bash
-mkdir -p ~/.config/sroiaaa && chmod 700 ~/.config/sroiaaa
+mkdir -p ~/.config/cass && chmod 700 ~/.config/cass
 umask 077
-cat > ~/.config/sroiaaa/env <<'ENVEOF'
+cat > ~/.config/cass/env <<'ENVEOF'
 export MINDROUTER_API_KEY=...
 export CASS_MINDROUTER_ENDPOINT=http://localhost:8000
 export CASS_MODEL=default-agent
@@ -438,7 +438,7 @@ export CASS_RT_ENDPOINT=https://rt.example.edu
 export RT_API_TOKEN=...
 export CASS_RT_QUEUES=Ops,Helpdesk
 ENVEOF
-chmod 600 ~/.config/sroiaaa/env
+chmod 600 ~/.config/cass/env
 ```
 
 `CASS_RT_QUEUES` is a comma-separated allowlist of RT queue names. An
@@ -458,7 +458,7 @@ self-signed certificate. It warns rather than defaulting to trust.
 ## Evaluations
 
 ```bash
-source ~/.config/sroiaaa/env
+source ~/.config/cass/env
 make eval-zabbix    # one model against the monitoring plane
 make eval-models    # several models, scored on routing and accuracy
 ```

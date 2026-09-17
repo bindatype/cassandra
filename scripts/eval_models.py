@@ -2,7 +2,7 @@
 """Grade tool-capable models on the Cass evidence loop.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_models.py [model ...]
 
 Each model is scored on whether it routed to the correct intent, extracted a

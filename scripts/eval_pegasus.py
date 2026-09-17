@@ -2,7 +2,7 @@
 """Exercise the accounting database through the full chat loop.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_pegasus.py [model]
 
 This suite is different in kind from the Zabbix one. There the model chooses

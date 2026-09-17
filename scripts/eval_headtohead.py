@@ -2,7 +2,7 @@
 """Compare two models across the question shapes that actually differ.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_headtohead.py gemma4-31b-vllm some-other-model
 
 Every earlier comparison used one question, an aggregate returning a single
@@ -22,7 +22,7 @@ Ground truth is computed here, per question, immediately before the run.
 import json, os, re, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from eval_common import (build_chat, default_model, normalize, require_env,
+from eval_common import (config_path, build_chat, default_model, normalize, require_env,
                         states_a_number, write_report)
 
 RUNS = int(os.environ.get("RUNS", "5"))
@@ -39,7 +39,7 @@ def ask(binary, model, question):
     started = time.time()
     try:
         proc = subprocess.run(
-            [binary, "-policy", os.path.expanduser("~/.config/sroiaaa/policy.json"),
+            [binary, "-policy", config_path("policy.json"),
              "-wazuh-insecure", "-model", model, question],
             capture_output=True, text=True, timeout=420)
         answer = proc.stdout.strip()

@@ -2,7 +2,7 @@
 """A/B the pre-Zabbix prompt against the current one, on the same code.
 
 Usage:
-    source ~/.config/sroiaaa/env
+    source ~/.config/cass/env
     python3 scripts/eval_prompt_ab.py [model]
     RUNS=5 python3 scripts/eval_prompt_ab.py             # uses $CASS_MODEL
     RUNS=5 python3 scripts/eval_prompt_ab.py gemma4-31b-vllm
@@ -104,12 +104,12 @@ def says(answer, number):
 def policy_path():
     """The deployed policy where there is one, the example otherwise.
 
-    The other eval scripts assume ~/.config/sroiaaa/policy.json exists. It does
+    The other eval scripts assume ~/.config/cass/policy.json exists. It does
     on sgtstubby and does not on a fresh clone, and failing over to the example
     keeps the suite runnable in both places rather than only where it was
     written.
     """
-    deployed = os.path.expanduser("~/.config/sroiaaa/policy.json")
+    deployed = os.path.expanduser("~/.config/cass/policy.json")
     if os.path.exists(deployed):
         return deployed
     return os.path.join(ROOT, "configs", "broker-policy.example.json")

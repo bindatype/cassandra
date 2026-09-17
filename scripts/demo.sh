@@ -1,7 +1,7 @@
 #!/bin/sh
 # A short walkthrough of the Cass evidence loop, for showing someone.
 #
-#   source ~/.config/sroiaaa/env
+#   source ~/.config/cass/env
 #   sh scripts/demo.sh
 #
 # Read-only throughout. Nothing here modifies any system.
