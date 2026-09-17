@@ -36,9 +36,17 @@ type Evidence struct {
 	// filter reads its result as narrow. If a filter was asked for and does not
 	// appear here, it was not applied, and the rows describe a wider question
 	// than the one asked.
-	Match       string    `json:"match,omitempty"`
-	Severity    string    `json:"severity,omitempty"`
-	State       string    `json:"state,omitempty"`
+	Match    string `json:"match,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	State    string `json:"state,omitempty"`
+	// Ordering records which end of the matching set the items came from, for
+	// the same reason Since is recorded. A truncated page is a sample, and a
+	// sample with an undeclared ordering reads as representative. Asked which
+	// tickets had waited longest, a model was handed the hundred most recent
+	// of several hundred, picked the earliest among them, and answered with
+	// perfect reasoning over evidence that excluded every ticket it was asked
+	// about.
+	Ordering    string    `json:"ordering,omitempty"`
 	RequestedAt time.Time `json:"requested_at"`
 	DurationMS  int64     `json:"duration_ms"`
 	ItemCount   int       `json:"item_count"`

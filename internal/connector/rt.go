@@ -173,7 +173,8 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 
 	query := ticketSearchQuery(step.Host, "", since, until, c.queues)
 	requestedAt := time.Now().UTC()
-	items, total, err := c.search(ctx, query, limit, ticketOrder(since, until))
+	order := ticketOrder(since, until)
+	items, total, err := c.search(ctx, query, limit, order)
 	if err != nil {
 		return Evidence{}, err
 	}
@@ -195,8 +196,28 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		ItemCount:      len(items),
 		TotalAvailable: total,
 		Truncated:      total > len(items),
+		Ordering:       orderingDescription(order),
 		Summary:        summary,
 		Items:          items,
+	}
+
+	// Said in words as well as recorded as a field, because this is the case
+	// that produced a confidently wrong answer: asked which tickets had waited
+	// longest, a model received the hundred most recent of several hundred and
+	// answered from the earliest among them. Its reasoning was sound and its
+	// evidence excluded every ticket the question was about.
+	//
+	// Only when the page is actually partial. On a complete result the ordering
+	// carries no risk of being mistaken for a sample.
+	if evidence.Truncated {
+		missing := "oldest"
+		if order == "ASC" {
+			missing = "most recent"
+		}
+		evidence.Warnings = append(evidence.Warnings, fmt.Sprintf(
+			"these are the %d %s of %d matching tickets; the %s are not in this page, "+
+				"so do not describe them as the extreme of any ordering other than this one",
+			len(items), orderingDescription(order), total, missing))
 	}
 
 	if len(c.queues) > maxRTQueueCensus {
@@ -608,4 +629,13 @@ func normalizeTicket(ticket rtTicket) EvidenceItem {
 		State:       ticket.Status,
 		Fields:      fields,
 	}
+}
+
+// orderingDescription says which end of the matching set a page came from, in
+// the words an answer would use rather than as a sort direction.
+func orderingDescription(order string) string {
+	if order == "ASC" {
+		return "earliest created first"
+	}
+	return "most recently created first"
 }
