@@ -41,11 +41,22 @@ ProtectHome=yes
 # Drop /tmp from CASS_ALLOWED_ROOTS and set PrivateTmp=yes to take it back.
 PrivateTmp=no
 
-# /proc is hidden except this service's own pids. process.list is not among the
-# enabled operations; enabling it means relaxing these two, which is again a
-# decision to make deliberately rather than to find already made.
+# Other processes are hidden; the system-wide files in /proc are not.
+#
+# ProcSubset=pid was set here too, and it silently cost two of the six fields
+# host.info can report: uptime_seconds reads /proc/uptime and kernel_version
+# reads /proc/version, and subset=pid hides every non-process file in /proc.
+# The agent skips a field it cannot read rather than failing, so the two simply
+# went missing and the answer read as though the operation did not support
+# them.
+#
+# ProtectProc=invisible is the part worth keeping: it hides other processes'
+# directories, which is what one service has no business reading about another.
+# /proc/uptime and /proc/version are system facts with no such concern.
+#
+# process.list is still not among the enabled operations. Enabling it is a
+# separate decision, and it would want this reviewed again.
 ProtectProc=invisible
-ProcSubset=pid
 
 # --- What it may do ----------------------------------------------------
 NoNewPrivileges=yes
