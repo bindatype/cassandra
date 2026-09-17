@@ -160,21 +160,21 @@ repo, or read the last line the script prints, which gives the full path.
 
 If it does not pass, see [Troubleshooting](#troubleshooting) below.
 
-### 4. Put `ask` on your PATH
+### 4. Put `askcass` on your PATH
 
 ```bash
 make install
-ask "how many agents are disconnected right now?"
+askcass "how many agents are disconnected right now?"
 ```
 
-`ask` is the everyday entry point: it sources your environment, rebuilds the
+`askcass` is the everyday entry point: it sources your environment, rebuilds the
 binary, and runs one question through the evidence loop. `make install`
 symlinks it into `~/bin` if you have one, otherwise `~/.local/bin`, or
 `make install PREFIX=...` to choose. It does not edit your shell config: if
 that directory is not already on your PATH it prints a note, and putting it
 there is your job. `make uninstall` removes the symlink.
 
-Entry points live in `bin/`: `ask`, `zabbix-probe.sh`, and `zoom-digest.sh`,
+Entry points live in `bin/`: `askcass`, `zabbix-probe.sh`, and `zoom-digest.sh`,
 which is the one cron runs. `scripts/` holds the evaluation harnesses and a
 shared library that is not meant to be run directly. Nothing requires you to
 put `bin/` itself on your PATH, and you should not: a repository on your PATH
@@ -189,7 +189,7 @@ Add `-model <name>` to try another model, or `-trace` to see the intent the
 model proposed and what policy did with it:
 
 ```bash
-ask -trace "what is broken on dss01?"
+askcass -trace "what is broken on dss01?"
 ```
 
 ### 5. What else you can run
@@ -213,11 +213,11 @@ run.
 |---|---|
 | `missing environment: ...` | The env file is not sourced in *this* shell, or a line lacks `export`. Sourcing does not survive a new terminal. |
 | Zabbix or Wazuh "connector error" | Usually a missing credential rather than a broken service. Check the variable exists: `printenv ZABBIX_RO_TOKEN \| wc -c`. |
-| The model says a source is "unavailable" or "not covered" | Almost always an unset variable, not an outage. An intent whose connector is not configured is withheld from the model, which cannot tell the difference. `ask` prints a `note:` line on stderr naming every source that is off and the variables that turn it on -- read that first. |
+| The model says a source is "unavailable" or "not covered" | Almost always an unset variable, not an outage. An intent whose connector is not configured is withheld from the model, which cannot tell the difference. `askcass` prints a `note:` line on stderr naming every source that is off and the variables that turn it on -- read that first. |
 | NetBox `http=000` | Not a bad token — nothing was sent. Either TLS (the chain is incomplete without `CASS_NETBOX_CACERT`) or IPv6 (the AAAA record does not route; `curl -4` proves it). `bin/netbox-probe.sh reach` needs no token and separates the two. |
 | `make: *** No rule to make target` | You are not in the repository root. |
 | An answer that is confidently wrong | Expected, and the point of the probe suite. Record it. Most rules in the prompt exist because of one of these. |
-| Answers ignore a feature you just added | You are running a stale binary. `ask` and the digest rebuild every run; a copy in `~/bin` does not. Use `make install`, not `cp`. |
+| Answers ignore a feature you just added | You are running a stale binary. `askcass` and the digest rebuild every run; a copy in `~/bin` does not. Use `make install`, not `cp`. |
 | Everything passes but the answer looks thin | Check `runtime/*.md` for the graded detail; the terminal summary is a summary. |
 
 A question answered from missing credentials tends to fail in the

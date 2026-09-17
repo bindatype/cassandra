@@ -196,6 +196,24 @@ else
 	bad "the old name survives outside the compatibility shims" "$(printf '%s' "$oldname" | head -8)"
 fi
 
+# The entry point is askcass. The docs said `ask` for a whole rename, including
+# a runnable example on the page a new contributor is told to follow first --
+# found by a reader, not by anything here, which is the third time today that
+# documentation was the last place the rename reached.
+#
+# Only two forms are checked, because both are unambiguously the command and
+# neither can be the English verb: backtick-quoted, and at the start of a line
+# inside a shell block. "ask for one explicitly" and "make probe # ask the
+# Zabbix trap questions" are left alone, which is the point of being narrow.
+staleask=$(git ls-files -z '*.md' 2>/dev/null |
+	xargs -0 grep -nE '`ask`|^[[:space:]]*ask[[:space:]]+["-]' 2>/dev/null |
+	cut -d: -f1,2 || true)
+if [ -z "$staleask" ]; then
+	ok "docs name the entry point askcass"
+else
+	bad "docs still call the entry point ask" "$(printf '%s' "$staleask" | head -6)"
+fi
+
 # The unit file is the only part of this project that nothing compiles and no
 # test exercises. A typo in it surfaces as a service that will not start on a
 # host somebody is already waiting on, so it is at least parsed here.

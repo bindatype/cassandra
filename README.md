@@ -52,7 +52,7 @@ internal/orchestrator/     the model loop: intent in, evidence out
 configs/                   example broker policy
 docs/                      adding-a-connector.md
 scripts/                   harness fitness survey, evidence-loop evaluations
-bin/                       entry points: ask, the probe suite, the digest
+bin/                       entry points: askcass, the probe suite, the digest
 scripts/                   evaluation harnesses and their shared library
 testdata/workspace/        sample files mounted into the container
 testdata/varlog/           sample log files mounted into the container
@@ -67,11 +67,11 @@ export CASS_AUTH_TOKEN="${CASS_AUTH_TOKEN:-dev-cass-token}"
 ```
 
 Every command below runs from the repository root. `make help` lists the
-targets, and `make install` puts `ask` on your PATH:
+targets, and `make install` puts `askcass` on your PATH:
 
 ```bash
 make install
-ask "how many agents are disconnected right now?"
+askcass "how many agents are disconnected right now?"
 ```
 
 Joining the project rather than just running it? Start with
