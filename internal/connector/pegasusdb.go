@@ -73,6 +73,25 @@ func NewPegasusConnector(config PegasusConfig) (*PegasusConnector, error) {
 	if timeout <= 0 {
 		timeout = pegasusDefaultTimeout
 	}
+
+	// One configured value governs all three bounds, because they were
+	// governed by three and disagreed.
+	//
+	// What was here before: the connector and max_statement_time both took 60s
+	// from pegasusDefaultTimeout, while the DSN in the deployment carried
+	// readTimeout=30s. So the client gave up at thirty seconds and the
+	// server-side limit -- the one whose whole purpose is to stop a query
+	// harming the database rather than merely inconveniencing the caller --
+	// sat at twice that and could never fire first. It was dead weight that
+	// read as protection.
+	//
+	// The DSN's own timeouts are overwritten rather than respected. They are
+	// connection-string details that get copied between hosts and edited by
+	// hand; a limit that matters should not be settable by whoever last pasted
+	// a DSN, and having it in two places is how they came to differ.
+	parsed.Timeout = timeout
+	parsed.ReadTimeout = timeout
+	dsn := parsed.FormatDSN()
 	maxRows := config.MaxRows
 	if maxRows <= 0 {
 		maxRows = pegasusDefaultMaxRows
@@ -81,12 +100,21 @@ func NewPegasusConnector(config PegasusConfig) (*PegasusConnector, error) {
 	if maxBytes <= 0 {
 		maxBytes = pegasusMaxTotalBytes
 	}
+	// The server gives up fractionally before the client does, so a query that
+	// runs too long ends as "max_statement_time exceeded" from MariaDB rather
+	// than as a client abandoning a connection. The first is a diagnosis; the
+	// second is a disconnection that could equally be a network fault, and the
+	// difference matters at 3am.
 	statementTimeout := config.StatementTimeout
 	if statementTimeout <= 0 {
-		statementTimeout = timeout
+		statementTimeout = timeout - timeout/10
+	}
+	if statementTimeout > timeout {
+		return nil, fmt.Errorf("pegasus statement timeout %s exceeds the connection timeout %s; "+
+			"the server-side limit would never fire first", statementTimeout, timeout)
 	}
 
-	db, err := sql.Open("mysql", config.DSN)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open pegasus: %w", err)
 	}

@@ -31,6 +31,7 @@ const (
 	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
 	pegasusDSNEnv          = "CASS_PEGASUS_DSN"
 	pegasusMaxRowsEnv      = "CASS_PEGASUS_MAX_ROWS"
+	pegasusTimeoutEnv      = "CASS_PEGASUS_TIMEOUT"
 	pegasusMaxBytesEnv     = "CASS_PEGASUS_MAX_BYTES"
 	auditPathEnv           = "CASS_BROKER_AUDIT"
 	rtEndpointEnv          = "CASS_RT_ENDPOINT"
@@ -247,7 +248,7 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 		connectors = append(connectors, wazuh)
 	}
 	if dsn := env.Get(pegasusDSNEnv); dsn != "" {
-		pegasus, err := connector.NewPegasusConnector(connector.PegasusConfig{DSN: dsn, MaxRows: pegasusMaxRows(), MaxBytes: pegasusMaxBytes()})
+		pegasus, err := connector.NewPegasusConnector(connector.PegasusConfig{DSN: dsn, MaxRows: pegasusMaxRows(), MaxBytes: pegasusMaxBytes(), Timeout: pegasusTimeout()})
 		if err != nil {
 			return nil, err
 		}
@@ -361,4 +362,24 @@ func unconfiguredSources(zabbixEndpoint, wazuhEndpoint, rtEndpoint string) []str
 		off = append(off, "endpoint evidence (set "+cassAgentConfigEnv+")")
 	}
 	return off
+}
+
+// pegasusTimeout reads the query time bound, falling back to the connector
+// default when unset.
+//
+// One value, because it governs three things that previously disagreed: how
+// long the driver waits on a socket, how long the connector waits overall, and
+// what max_statement_time the server is told to enforce. Setting them
+// separately is how the server-side limit came to sit at twice the client's
+// and could never fire first.
+func pegasusTimeout() time.Duration {
+	value := env.Get(pegasusTimeoutEnv)
+	if value == "" {
+		return 0
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		return 0
+	}
+	return timeout
 }
