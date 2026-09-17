@@ -103,7 +103,12 @@ def main():
             if call.get("item_count"):
                 items[key].append(call["item_count"])
 
-    for key in sorted(by_source, key=lambda k: -len(by_source[k])):
+    # The union, not just the sources that succeeded. Failed attempts are
+    # recorded against orchestrator/attempt_failed, which has no successes at
+    # all -- so iterating by_source reported "0 failed" for everything while 39
+    # questions had failed. A statistics script that cannot see failures is
+    # worse than none, because it looks like evidence of health.
+    for key in sorted(set(by_source) | set(failures), key=lambda k: -(len(by_source[k]) + failures[k])):
         total = len(by_source[key]) + failures[key]
         print(f"\n  {key}   {total} call(s), {failures[key]} failed, "
               f"{truncations[key]} truncated ({100.0 * truncations[key] / max(1, len(by_source[key])):.0f}%)")
