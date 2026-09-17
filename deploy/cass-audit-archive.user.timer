@@ -1,0 +1,14 @@
+[Unit]
+Description=Archive Cassandra audit records weekly
+Documentation=https://github.com/bindatype/cassandra
+
+[Timer]
+# Weekly is often enough: the log grows about 111 KB a day, so a week is under
+# a megabyte, and archiving is only about keeping the readers fast. Nothing is
+# deleted, so a missed run costs nothing but a larger active file.
+OnCalendar=Sun 03:30
+Persistent=true
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

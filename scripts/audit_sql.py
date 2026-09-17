@@ -18,6 +18,8 @@ no trace of what went wrong beside them.
 """
 import argparse
 import collections
+import glob
+import gzip
 import json
 import os
 import re
@@ -27,25 +29,17 @@ DEFAULT_LOG = "~/.local/share/cass/broker-audit.jsonl"
 
 
 def load(path):
-    """Yield (record, call) for every call that carries SQL.
+    """Yield (record, call) for every call that carries SQL, archives included.
 
     Bad lines are skipped rather than fatal. This is an append-only log written
-    by a running service; a truncated final line means the service is mid-write,
-    which is not a reason to refuse to read the other 1,600 records.
+    by a short-lived writer; a truncated final line means a question was
+    mid-write, which is not a reason to refuse to read the other 1,600 records.
     """
-    with open(os.path.expanduser(path)) as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            for call in record.get("calls") or []:
-                query = call.get("query") or ""
-                if "select" in query.lower():
-                    yield record, call
+    for record in read_records(path):
+        for call in record.get("calls") or []:
+            query = call.get("query") or ""
+            if "select" in query.lower():
+                yield record, call
 
 
 def one_line(text, width=100):
@@ -85,10 +79,9 @@ def main():
     parser.add_argument("--sql", action="store_true", help="print the SQL, not just the question")
     options = parser.parse_args()
 
-    try:
-        rows = list(load(options.log))
-    except FileNotFoundError:
-        sys.exit(f"no audit log at {options.log}; set CASS_BROKER_AUDIT and ask a question")
+    rows = list(load(options.log))
+    if not rows:
+        sys.exit(f"no SQL found under {options.log} or its archives")
 
     if options.grep:
         needle = options.grep.lower()
@@ -138,6 +131,45 @@ def main():
             print(f"        err: {one_line(call['error'], 88)}")
     print(f"\n{len(rows)} shown. --record N for one in full.")
 
+
+def audit_files(path):
+    """The active log plus every archive beside it, newest content last.
+
+    Archiving would otherwise make history disappear from these reports without
+    saying so -- the file would still be there, still readable, and quietly
+    describe only the days since the last archive run. A reader that silently
+    narrows its own window is the same failure this project keeps finding
+    elsewhere.
+    """
+    active = os.path.expanduser(path)
+    archive = os.path.join(os.path.dirname(active), "archive")
+    found = sorted(glob.glob(os.path.join(archive, "broker-audit-*.jsonl.gz")))
+    if os.path.exists(active):
+        found.append(active)
+    return found
+
+
+def read_records(path):
+    """Every record from the active log and its archives, in timestamp order.
+
+    Sorted rather than trusted to file order: archives are written per run, so
+    two runs in one month produce two files, and nothing guarantees the names
+    sort the way the contents do.
+    """
+    records = []
+    for name in audit_files(path):
+        opener = gzip.open if name.endswith(".gz") else open
+        with opener(name, "rt") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except ValueError:
+                    continue
+    records.sort(key=lambda r: r.get("timestamp") or "")
+    return records
 
 if __name__ == "__main__":
     main()

@@ -95,6 +95,46 @@ else
 	bad "evaluation harnesses do not import" "$badpy"
 fi
 
+# Nothing may be defined after the __main__ guard.
+#
+# Importing a module runs its top level but not main(), so the import check
+# above cannot see a function that main() calls and that is defined below the
+# guard -- the module imports cleanly and fails with NameError the moment it is
+# run. Both audit readers shipped that way for one commit: verify passed, and
+# they raised on the first real invocation.
+#
+# Checked statically rather than by running each script, because running them
+# needs credentials, a network, and in some cases writes a report.
+badguard=""
+for script in scripts/*.py; do
+	err=$(python3 - "$script" <<'PYEOF'
+import ast, sys
+
+source = open(sys.argv[1]).read()
+tree = ast.parse(source)
+guard = None
+for node in tree.body:
+    if (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+            and getattr(node.test.left, "id", "") == "__name__"):
+        guard = node.lineno
+if guard is None:
+    sys.exit(0)
+late = [n.name if hasattr(n, "name") else type(n).__name__
+        for n in tree.body
+        if n.lineno > guard and isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Assign))]
+if late:
+    print("defined after the __main__ guard: " + ", ".join(str(x) for x in late))
+    sys.exit(1)
+PYEOF
+	) || badguard="$badguard
+  $script: $err"
+done
+if [ -z "$badguard" ]; then
+	ok "nothing defined after the __main__ guard"
+else
+	bad "python defined after its entry point" "$badguard"
+fi
+
 # Shell scripts are checked for syntax the way the Python ones are checked for
 # import. Nothing else runs them: bin/zoom-digest.sh fires from cron at 04:45,
 # and a typo in it surfaces as a line in a log nobody reads -- which is exactly

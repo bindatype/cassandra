@@ -14,6 +14,8 @@ that interpolation would imply a precision the data does not have.
 """
 import argparse
 import collections
+import glob
+import gzip
 import json
 import os
 import sys
@@ -43,24 +45,11 @@ def main():
     parser.add_argument("--since", help="ISO date; records before it are ignored")
     options = parser.parse_args()
 
-    try:
-        handle = open(os.path.expanduser(options.log))
-    except FileNotFoundError:
-        sys.exit(f"no audit log at {options.log}")
-
-    records = []
-    with handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if options.since and (record.get("timestamp") or "") < options.since:
-                continue
-            records.append(record)
+    sources = audit_files(options.log)
+    if not sources:
+        sys.exit(f"no audit log or archives at {options.log}")
+    records = [r for r in read_records(options.log)
+               if not options.since or (r.get("timestamp") or "") >= options.since]
 
     if not records:
         sys.exit("no records matched")
@@ -117,11 +106,50 @@ def main():
             summarize("    items returned", items[key])
 
     # --- the log itself ---------------------------------------------------
-    size = os.path.getsize(os.path.expanduser(options.log))
+    size = sum(os.path.getsize(name) for name in sources)
     days = max(1, len(set((r.get("timestamp") or "")[:10] for r in records)))
-    print(f"\nAUDIT LOG\n  {size / 1048576:.1f} MB over {days} day(s) with records"
-          f"  ~{size / days / 1024:.0f} KB/day, no rotation configured")
+    print(f"\nAUDIT LOG\n  {size / 1048576:.1f} MB across {len(sources)} file(s) over {days} day(s)"
+          f"  ~{size / days / 1024:.0f} KB/day on disk")
 
+
+def audit_files(path):
+    """The active log plus every archive beside it, newest content last.
+
+    Archiving would otherwise make history disappear from these reports without
+    saying so -- the file would still be there, still readable, and quietly
+    describe only the days since the last archive run. A reader that silently
+    narrows its own window is the same failure this project keeps finding
+    elsewhere.
+    """
+    active = os.path.expanduser(path)
+    archive = os.path.join(os.path.dirname(active), "archive")
+    found = sorted(glob.glob(os.path.join(archive, "broker-audit-*.jsonl.gz")))
+    if os.path.exists(active):
+        found.append(active)
+    return found
+
+
+def read_records(path):
+    """Every record from the active log and its archives, in timestamp order.
+
+    Sorted rather than trusted to file order: archives are written per run, so
+    two runs in one month produce two files, and nothing guarantees the names
+    sort the way the contents do.
+    """
+    records = []
+    for name in audit_files(path):
+        opener = gzip.open if name.endswith(".gz") else open
+        with opener(name, "rt") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except ValueError:
+                    continue
+    records.sort(key=lambda r: r.get("timestamp") or "")
+    return records
 
 if __name__ == "__main__":
     main()

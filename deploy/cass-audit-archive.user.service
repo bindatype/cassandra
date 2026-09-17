@@ -1,0 +1,7 @@
+[Unit]
+Description=Archive settled Cassandra audit records into monthly files
+Documentation=https://github.com/bindatype/cassandra
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh %h/dev/cassandra/bin/cass-audit-archive.sh
