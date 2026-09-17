@@ -366,6 +366,12 @@ changes in the threat model once the token crosses a wire -- is argued in
 [docs/beyond-loopback.html](docs/beyond-loopback.html). It is a decision memo
 rather than a guide: nothing in it is built yet.
 
+What the agent should be able to do beyond listing and stat-ing files -- and
+the one question that has to be settled first, whether it may execute programs
+at all -- is in [docs/cassd-capabilities.md](docs/cassd-capabilities.md). It
+records the current capability state as well as the proposal, so it is the
+place to look for what is enabled where.
+
 Only intents whose connector is configured are offered to the model. Endpoint
 evidence is enabled by `CASS_AGENT_CONFIG`, a host-to-agent map held in the
 operator environment, never in a route plan. Each host has its own endpoint
