@@ -10,13 +10,15 @@
     "sgtstubby.arc.gwu.edu": {
       "resources": [
         "log-dir",
-        "log-dir-metadata"
+        "log-dir-metadata",
+        "patch-history"
       ]
     },
     "winston.arc.gwu.edu": {
       "resources": [
         "log-dir",
-        "log-dir-metadata"
+        "log-dir-metadata",
+        "patch-history"
       ]
     }
   },
@@ -45,6 +47,13 @@
     "log-dir-metadata": {
       "operation": "filesystem.stat",
       "path": "/var/log"
+    },
+    "patch-history": {
+      "operation": "filesystem.tail",
+      "path": "/var/log/dnf.rpm.log",
+      "params": {
+        "max_bytes": 49152
+      }
     }
   }
 }
