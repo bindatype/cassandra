@@ -361,6 +361,11 @@ and dates. Ticket content and transaction history are never fetched; see
 "How sensitive is the content?" in
 [docs/adding-a-connector.md](docs/adding-a-connector.md).
 
+How a second agent should reach the broker -- Unix socket versus TLS, and what
+changes in the threat model once the token crosses a wire -- is argued in
+[docs/beyond-loopback.html](docs/beyond-loopback.html). It is a decision memo
+rather than a guide: nothing in it is built yet.
+
 Only intents whose connector is configured are offered to the model. Endpoint
 evidence is enabled by `CASS_AGENT_CONFIG`, a host-to-agent map held in the
 operator environment, never in a route plan. Each host has its own endpoint

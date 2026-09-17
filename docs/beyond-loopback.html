@@ -1,0 +1,561 @@
+<!--
+  Beyond Loopback -- transport decision memo for cassd, the endpoint agent.
+
+  Published copy (this is what reviewers were sent):
+      https://claude.ai/artifact/GMRm63n5FvEpEJgjE9hGXy
+
+  This file is the source. Edit here, then republish TO THAT URL rather than
+  publishing afresh: a publish that does not name the existing URL creates a
+  second artifact, and the link already circulated would then go stale while
+  looking fine.
+
+  Rev 3. Rev 2 corrected four claims raised in external review -- all five of
+  that review's findings held up against the code, and the corrections are
+  marked in the page rather than folded in silently, so a returning reviewer
+  can see what moved.
+
+  No <!DOCTYPE>, <html>, <head> or <body> here on purpose: the publisher wraps
+  the file in that skeleton, and a second set nests the document inside itself.
+-->
+<title>Beyond Loopback</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root {
+    --ground: #f7f8fa;
+    --surface: #ffffff;
+    --sunk: #eef1f4;
+    --ink: #15181d;
+    --muted: #5b636e;
+    --faint: #848c96;
+    --rule: #dce0e6;
+    --accent: #166b7a;
+    --accent-soft: #e2f0f2;
+    --good: #2e7d5b;
+    --warn: #a4681c;
+    --risk: #b0453c;
+    --shadow: 0 1px 2px rgba(21, 24, 29, .06);
+
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "IBM Plex Serif", ui-serif, Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #11141a;
+      --surface: #181c23;
+      --sunk: #1f242c;
+      --ink: #e5e9ee;
+      --muted: #a2abb6;
+      --faint: #79828d;
+      --rule: #2a313a;
+      --accent: #4bb3c4;
+      --accent-soft: #15323a;
+      --good: #5cb98c;
+      --warn: #d69a4c;
+      --risk: #e0776d;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #11141a;
+    --surface: #181c23;
+    --sunk: #1f242c;
+    --ink: #e5e9ee;
+    --muted: #a2abb6;
+    --faint: #79828d;
+    --rule: #2a313a;
+    --accent: #4bb3c4;
+    --accent-soft: #15323a;
+    --good: #5cb98c;
+    --warn: #d69a4c;
+    --risk: #e0776d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding-block: 0 4rem;
+    padding-left: 20px;
+    padding-right: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 44rem; margin: 0 auto; }
+
+  /* ---- masthead ---- */
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-block: 3rem 1.1rem;
+    margin-bottom: 2rem;
+  }
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: .7rem;
+    font-weight: 600;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 .9rem;
+  }
+  h1 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: clamp(2rem, 6vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -.021em;
+    margin: 0 0 .7rem;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.12rem;
+    color: var(--muted);
+    margin: 0;
+    max-width: 34rem;
+    text-wrap: pretty;
+  }
+  .byline {
+    font-family: var(--sans);
+    font-size: .76rem;
+    color: var(--faint);
+    margin-top: 1.4rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem 1.3rem;
+  }
+  .byline b { font-weight: 500; color: var(--muted); }
+
+  /* ---- structure ---- */
+  section { margin-block: 2.9rem; }
+  h2 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.32rem;
+    letter-spacing: -.012em;
+    line-height: 1.25;
+    margin: 0 0 .25rem;
+    text-wrap: balance;
+  }
+  h2 + .deck {
+    font-family: var(--sans);
+    font-size: .84rem;
+    color: var(--faint);
+    margin: 0 0 1.35rem;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: .97rem;
+    margin: 1.9rem 0 .5rem;
+    letter-spacing: -.004em;
+  }
+  p { margin: 0 0 1.05rem; text-wrap: pretty; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+  code {
+    font-family: var(--mono);
+    font-size: .855em;
+    background: var(--sunk);
+    padding: .1em .34em;
+    border-radius: 3px;
+  }
+
+  /* ---- verdict strip ---- */
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-block: 2rem;
+  }
+  .verdict div { background: var(--surface); padding: .95rem 1.05rem; }
+  .verdict dt {
+    font-family: var(--sans);
+    font-size: .66rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 .3rem;
+  }
+  .verdict dd {
+    font-family: var(--sans);
+    font-size: 1.24rem;
+    font-weight: 500;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.015em;
+  }
+  .verdict dd small {
+    display: block;
+    font-size: .72rem;
+    font-weight: 400;
+    color: var(--muted);
+    letter-spacing: 0;
+    margin-top: .12rem;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; margin-block: 1.4rem; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: .87rem; }
+  caption {
+    caption-side: bottom;
+    text-align: left;
+    font-size: .76rem;
+    color: var(--faint);
+    padding-top: .65rem;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: .68rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border-bottom: 1px solid var(--ink);
+    padding: 0 .8rem .45rem 0;
+  }
+  td {
+    padding: .58rem .8rem .58rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td.mono { font-family: var(--mono); font-size: .8rem; white-space: nowrap; }
+  tr.cleared td { color: var(--muted); }
+  .tick { color: var(--good); font-weight: 600; }
+  .cross { color: var(--risk); font-weight: 600; }
+
+  /* ---- routes ---- */
+  .routes { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; margin-block: 1.6rem; }
+  @media (max-width: 640px) { .routes { grid-template-columns: 1fr; } }
+  .route {
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--accent);
+    background: var(--surface);
+    padding: 1.15rem 1.2rem 1.3rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .55rem;
+  }
+  .route.remote { border-top-color: var(--warn); }
+  .route h3 { margin: 0; font-size: 1.02rem; }
+  .route .tag {
+    font-family: var(--sans);
+    font-size: .66rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .route.remote .tag { color: var(--warn); }
+  .route p { font-size: .93rem; margin: 0; }
+  .route ul { margin: .1rem 0 0; padding-left: 1.05rem; font-size: .89rem; }
+  .route li { margin-bottom: .32rem; }
+  .route .cost {
+    font-family: var(--sans);
+    font-size: .8rem;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: .6rem;
+    margin-top: auto;
+  }
+
+  .corrected {
+    border-left: 3px solid var(--risk);
+    background: var(--surface);
+    padding: .9rem 1.1rem;
+    margin-block: 1.5rem;
+    font-size: .93rem;
+  }
+  .corrected .lede {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: .72rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--risk);
+    display: block;
+    margin-bottom: .4rem;
+  }
+  .corrected p { margin-bottom: .55rem; }
+  .corrected p:last-child { margin-bottom: 0; }
+
+  /* ---- callout ---- */
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: .95rem 1.1rem;
+    margin-block: 1.6rem;
+    font-size: .95rem;
+  }
+  .note p { margin-bottom: .6rem; }
+  .note p:last-child { margin-bottom: 0; }
+  .note .lede {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: .74rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: .4rem;
+  }
+
+  /* ---- questions ---- */
+  ol.questions { counter-reset: q; list-style: none; padding: 0; margin: 1.4rem 0 0; }
+  ol.questions > li {
+    counter-increment: q;
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: .2rem 0;
+    padding-block: 1rem;
+    border-top: 1px solid var(--rule);
+  }
+  ol.questions > li::before {
+    content: "Q" counter(q);
+    font-family: var(--sans);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    color: var(--accent);
+    padding-top: .28rem;
+  }
+  ol.questions .q {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 .3rem;
+  }
+  ol.questions .why { font-size: .93rem; color: var(--muted); margin: 0; }
+
+  pre {
+    font-family: var(--mono);
+    font-size: .79rem;
+    line-height: 1.6;
+    background: var(--sunk);
+    border: 1px solid var(--rule);
+    padding: .85rem 1rem;
+    overflow-x: auto;
+    margin-block: 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 3.4rem;
+    padding-top: 1.2rem;
+    font-family: var(--sans);
+    font-size: .78rem;
+    color: var(--faint);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Cassandra · decision memo</p>
+  <h1>Beyond Loopback</h1>
+  <p class="standfirst">The endpoint agent works. Everything that makes it comfortable is the fact that it never touches a wire — and the second host is where that stops being true.</p>
+  <div class="byline">
+    <span><b>Status</b> deployed, sgtstubby</span>
+    <span><b>Open</b> transport for host two</span>
+    <span><b>For review</b> Codex, Gemini</span>
+    <span><b>Rev 2</b> after review</span>
+    <span><b>2026-09-16</b></span>
+  </div>
+</header>
+
+<section>
+  <h2>Where it stands</h2>
+  <p class="deck">Measured, not estimated</p>
+  <p><code>cassd</code> runs on sgtstubby as a systemd service and answers <code>live.evidence</code> — the intent the README has promised since Phase One with nothing behind it. It lists and stats paths under two roots, and does nothing else.</p>
+
+  <dl class="verdict">
+    <div><dt>Exposure</dt><dd>1.1 <small>systemd-analyze, “OK”</small></dd></div>
+    <div><dt>Identity</dt><dd>DynamicUser <small>no groups, owns nothing</small></dd></div>
+    <div><dt>Operations</dt><dd>3 <small>describe, list, stat</small></dd></div>
+    <div><dt>Anonymous</dt><dd>401 <small>fails closed</small></dd></div>
+  </dl>
+
+  <p>The filesystem is read-only in the service's own mount namespace via <code>ProtectSystem=strict</code>, and <code>@mount</code> is denied outright — so the daemon cannot mount anything even if a later change tries to. That is a stronger statement than mounting things read-only itself, and it does not depend on the code continuing to have no write path, which it currently does not outside its audit log.</p>
+
+  <p>What it can reach is bounded by ordinary Unix permissions rather than by policy alone. <code>/var/log</code> is <code>0755</code>, so the directory lists; <code>/var/log/messages</code> and <code>/var/log/secure</code> are <code>0600 root:root</code>, so they do not open. Reading those would be a deliberate grant — a <code>SupplementaryGroups=</code> line — and it should be argued on its own rather than inherited from a deployment.</p>
+</section>
+
+<section>
+  <h2>What the score does and does not say</h2>
+  <p class="deck">Calibration before anyone reads 1.1 as a safety claim</p>
+  <p><code>systemd-analyze security</code> walks a fixed checklist of roughly seventy-five directives, weights each, and normalises to 0–10. Roughly: under 1.0 is <em>OK</em>, under 5.0 <em>MEDIUM</em>, above 9.0 <em>DANGEROUS</em>. A unit with no hardening at all scores about 9.6; most distribution daemons land between 6 and 9.</p>
+
+  <p>It reads the unit file and nothing else. It knows nothing about the program. A daemon that shells out to <code>sh -c $input</code> with a 0.1 score is owned on the first request. Conversely, almost everything actually protecting <code>cassd</code> is invisible to it: the code has no write path, allowed roots are canonicalised through <code>EvalSymlinks</code> so a symlink cannot walk out, every request is authorised by the broker against policy before it is issued, and responses are capped at 128 KiB with a 20-second timeout. None of that scores a point.</p>
+
+  <p>Read 1.1 as <em>this unit declares nearly every restriction available</em>, not as <em>this service is safe</em>.</p>
+
+  <div class="tablewrap">
+    <table>
+      <caption>Remaining findings. The displayed total is normalised, not a sum — these weights are relative.</caption>
+      <thead><tr><th>Directive</th><th>Why it stands</th><th class="num">Wt</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">PrivateNetwork</td><td>It is an HTTP server the broker connects to</td><td class="num">0.5</td></tr>
+        <tr><td class="mono">AF_INET</td><td>Same — it needs a TCP socket</td><td class="num">0.3</td></tr>
+        <tr><td class="mono">PrivateUsers</td><td>Untested against DynamicUser; may be free</td><td class="num">0.2</td></tr>
+        <tr><td class="mono">RootDirectory</td><td>A chroot would hide <code>/var/log</code>, the point</td><td class="num">0.1</td></tr>
+        <tr><td class="mono">DeviceAllow</td><td>Costs <code>/dev/urandom</code> to remove</td><td class="num">0.1</td></tr>
+        <tr><td class="mono">IPAddressDeny</td><td>Already localhost-only; any allow-list scores &gt; 0</td><td class="num">0.1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lede">One finding worth recording</span>
+    <p><code>DevicePolicy=closed</code> with an empty <code>DeviceAllow=</code> was added to clear the <code>char-rtc:r</code> point. It cleared nothing: <code>closed</code> is itself what grants the standard device set, so emptying the extra allows leaves the defaults where they were. Removing rtc needs <code>DevicePolicy=strict</code> with an explicit list, and <code>strict</code> with an empty list denies <code>/dev/urandom</code>, stopping the Go runtime before <code>main()</code>.</p>
+    <p>Both lines were deleted rather than left in. A directive that implies a protection it does not provide is worse than no directive — the next reader takes it as settled.</p>
+  </div>
+</section>
+
+<section>
+  <h2>The fork</h2>
+  <p class="deck">0.8 of the remaining 1.1 is transport</p>
+  <p><code>PrivateNetwork</code> and <code>AF_INET</code> together are most of what is left, and both exist only because the agent speaks TCP. They point in opposite directions depending on where the next agent runs, which is why this is a decision rather than a backlog item.</p>
+
+  <div class="routes">
+    <div class="route">
+      <span class="tag">Route A</span>
+      <h3>Unix socket, local only</h3>
+      <p>The agent listens on a socket file instead of a port. The broker connects through the filesystem.</p>
+      <ul>
+        <li><code>PrivateNetwork=yes</code> becomes possible — the service gets no network at all</li>
+        <li><code>RestrictAddressFamilies=AF_UNIX</code> only</li>
+        <li>Access control becomes socket ownership and mode, which the kernel enforces</li>
+        <li>The bearer token becomes belt-and-braces rather than the only lock</li>
+      </ul>
+      <p class="cost">Clears ~0.8. Cannot reach a second host by definition.</p>
+    </div>
+    <div class="route remote">
+      <span class="tag">Route B</span>
+      <h3>TLS, and then mTLS</h3>
+      <p>The agent keeps a TCP port and presents a certificate. The broker verifies it, and eventually presents one of its own.</p>
+      <ul>
+        <li>Already enforced in code: the connector refuses any non-loopback endpoint that is not <code>https</code></li>
+        <li>Needs an internal CA — public issuance will not reach these hosts</li>
+        <li><code>IPAddressAllow</code> narrows from localhost to the broker's address</li>
+        <li>mTLS turns “whoever holds the string” into “whoever holds the key”; revocation is then <em>possible</em>, but needs CRL/OCSP or short-lived certificates and per-agent authorisation to be real</li>
+      </ul>
+      <p class="cost">Clears none of the 0.8. Reaches every host.</p>
+    </div>
+  </div>
+
+  <h3>Route A's ownership model is a unit directive, not new design</h3>
+  <p>The obvious objection to Route A is that a socket needs an access model, and inventing one is exactly the kind of security design that goes wrong quietly. It does not have to be invented. <code>systemd</code> socket activation already owns this problem: a <code>.socket</code> unit creates the socket with an owner, a group and a mode, and hands the listening descriptor to a service that never opens a network socket itself.</p>
+
+<pre><code># cassd.socket
+[Socket]
+ListenStream=/run/cassd/cassd.sock
+SocketUser=glenamac      # the broker's identity
+SocketMode=0600          # nobody else can even connect
+</code></pre>
+
+  <p>Two consequences worth separating. The access decision moves from a string the caller presents to a permission the kernel checks before a byte is read — which is the one thing a bearer token structurally cannot do, and which matters more given that a token authorises everything under the roots rather than just the policy's aliases. And the service can then run with <code>PrivateNetwork=yes</code> and <code>RestrictAddressFamilies=AF_UNIX</code>, because it no longer needs a network stack at all.</p>
+
+  <p>The Go side is not free but it is small: take the listener from the inherited descriptor rather than calling <code>ListenAndServe</code> on an address. That is a handful of lines around <code>net.FileListener</code>, plus the unit. Calling it “net-new implementation” is fair; calling it a new security design is not, and the distinction is most of the cost estimate.</p>
+
+  <p>They are not exclusive. The agent could support both, and the local deployment would take Route A while remote ones take Route B. That is also a decision, and not a free one: two transports is two code paths, two failure modes, and two things to get right in the connector's endpoint validation.</p>
+
+  <div class="corrected">
+    <span class="lede">Neither route exists yet</span>
+    <p><code>cassd</code> serves over TCP and nothing else — there is no Unix-socket listener, no TLS listener, and no certificate configuration. The connector speaks HTTP(S) only. The <code>https</code> rule it enforces is a <em>client-side refusal to be configured badly</em>, not remote TLS support.</p>
+    <p>So both routes are net-new implementation, and the choice is about which to build rather than which to enable. Rev 1 read as though Route B were closer to done than Route A; it is not.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What remote actually changes</h2>
+  <p class="deck">The threat model, not just the plumbing</p>
+
+  <h3>The token becomes a network credential — and it outranks the policy</h3>
+  <p>Today it never leaves the kernel. Remotely it is at rest on both ends and in flight between them. <code>CASS_AUTH_TOKENS</code> already accepts a comma-separated list specifically so a token can be rotated without a flag day — that facility matters locally in theory and remotely in practice.</p>
+  <p>More important than where it travels is what it authorises. The agent's request envelope carries an operation and a raw target path. It has no notion of the broker's resource aliases: the <code>log-dir → /var/log</code> mapping exists only broker-side. So the policy bounds <strong>what Cassandra issues</strong>, not <strong>what the token can ask for</strong>. Anyone holding it can call the agent directly for any enabled operation on any path beneath <code>CASS_ALLOWED_ROOTS</code>.</p>
+  <p>That makes the roots, not the policy, the real boundary for a token holder — and it makes keeping them narrow load-bearing rather than tidy. It is also an argument in Route A's favour that has nothing to do with the exposure score: a socket with an ownership model bounds <em>who can call at all</em>, which a bearer token never does.</p>
+
+  <h3>The broker becomes the concentrated target</h3>
+  <p>It holds every host's endpoint and every host's token. Per-host tokens mean one compromised agent does not yield the others; they do nothing about the machine holding all of them. Compromising the broker is strictly worse than compromising any single agent, because each agent's hardening bounds only that host.</p>
+
+  <h3>Hardening changes role, not value</h3>
+  <p>The <code>DynamicUser</code> and read-only work does not protect the network path and never did. What it does is bound the consequence: a compromised agent is a read-only window onto world-readable files, not a foothold. That argument gets <em>more</em> important as the number of agents grows, not less.</p>
+
+  <h3>Availability becomes a dependency with a loop in it</h3>
+  <p>An agent that is <em>configured</em> is offered to the model whether or not it is <em>running</em>. Intents are derived from the connectors the executor can reach, not from their health, so a stopped agent is not a quiet absence — it is an execution failure returned to the model as a correctable tool error, which spends one of its five turns. The system that would ordinarily notice a service being down is this one. That recursion is worth naming before it is discovered.</p>
+
+  <div class="corrected">
+    <span class="lede">Corrected in rev 2</span>
+    <p>Rev 1 said a down agent causes the intent to be withheld from the model. That is wrong. Withholding happens only when the connector is absent or unconfigured — <code>NewSession</code> builds the intent list from <code>executor.Sources()</code>, which reports connectors that exist, not connectors that answer.</p>
+    <p>The practical difference matters: a down agent costs turns and produces a visible failure, rather than silently shrinking what Cassandra claims it can do.</p>
+  </div>
+</section>
+
+<section>
+  <h2>For the reviewers</h2>
+  <p class="deck">Where disagreement would be most useful</p>
+  <p>Rev 1 drew five findings, all of which held up against the code. Four are corrected above and one — a README still asserting no agent was deployed — is fixed in the repository. The questions below are unchanged except where those corrections bear on them.</p>
+  <ol class="questions">
+    <li>
+      <p class="q">Is a dual transport worth two code paths?</p>
+      <p class="why">Route A is strictly better where it applies and useless where it does not. The alternative is TLS everywhere including loopback, paying 0.8 of exposure and a certificate on every host to keep one code path. Both are unbuilt, so this is a question about what to write, not what to switch on — though socket activation makes Route A markedly cheaper than it first appears.</p>
+    </li>
+    <li>
+      <p class="q">Does mTLS belong in the first remote deployment or the second?</p>
+      <p class="why">Bearer-over-TLS is materially safer than today and ships sooner. Adding client certificates later means revisiting every host. Doing it first delays the first remote agent behind a CA decision.</p>
+    </li>
+    <li>
+      <p class="q">Should the broker hold every token, or should agents authenticate the broker?</p>
+      <p class="why">The current direction is one-way: agents trust whoever presents the right string. Reversing or doubling that changes where a compromise concentrates.</p>
+    </li>
+    <li>
+      <p class="q">Is <code>PrivateUsers=yes</code> free here?</p>
+      <p class="why">Worth 0.2 and untested. The service reads only world-readable files, so it may cost nothing — but it interacts with <code>DynamicUser</code>, and the claim should be measured rather than asserted.</p>
+    </li>
+    <li>
+      <p class="q">What is the monitoring story for the monitor?</p>
+      <p class="why">A stopped agent spends a turn and returns an error the model must handle, on every question that routes to it. The existing morning digest and its watchdog are the obvious hook, and neither knows about agents yet.</p>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>Reproducing the numbers</h2>
+  <p class="deck">So a reviewer can disagree with the measurement, not just the reading</p>
+<pre><code>systemctl is-active cassd
+systemd-analyze security cassd | tail -2
+systemd-analyze security cassd | grep "✗"
+
+# the functional check, which matters more than the score
+askcass "list the files in /var/log on sgtstubby"</code></pre>
+  <p>Deployed configuration is <code>CASS_ALLOWED_ROOTS=/var/log,/tmp</code> and <code>CASS_ENABLED_OPERATIONS=capabilities.describe,filesystem.list,filesystem.stat</code>, bound to <code>127.0.0.1:8099</code>. The unit, the environment template and the install runbook are in <code>deploy/</code>.</p>
+</section>
+
+<footer>
+  Cassandra · endpoint agent transport · prepared for external review. Figures measured on sgtstubby, systemd 252, Rocky 9.
+</footer>
+
+</div>
