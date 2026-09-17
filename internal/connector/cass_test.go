@@ -39,7 +39,7 @@ func TestCassConnectorExecutesOnlyTheApprovedStep(t *testing.T) {
 	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
 		Source:    broker.SourceCass,
 		Action:    "operations.execute",
-		Host:      "sgtstubby.arc.gwu.edu",
+		Host:      testHost(t),
 		Operation: "filesystem.tail",
 		Target:    &broker.OperationTarget{Path: logPath},
 		Params:    &broker.OperationParams{MaxBytes: 1024},
@@ -100,7 +100,7 @@ func TestCassConnectorDoesNotFollowRedirects(t *testing.T) {
 	defer redirector.Close()
 
 	connector := newTestCass(t, redirector.URL)
-	_, err := connector.Execute(context.Background(), validCassStep())
+	_, err := connector.Execute(context.Background(), validCassStep(t))
 	if err == nil || !strings.Contains(err.Error(), "agent_error") {
 		t.Fatalf("error = %v, want redirect refusal", err)
 	}
@@ -133,10 +133,27 @@ func TestParseCassAgentsRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+// testHost is the name these fixtures address.
+//
+// It is this machine's hostname, not a plausible-looking one, because the
+// fixtures run a REAL agent over httptest and that agent reports where it
+// actually is. Addressing it as sgtstubby made every one of these tests a
+// host mismatch the moment the identity check existed -- correctly, which is
+// the point: a fake agent claiming to be a production host is exactly what the
+// check refuses.
+func testHost(t *testing.T) string {
+	t.Helper()
+	name, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("hostname: %v", err)
+	}
+	return name
+}
+
 func newTestCass(t *testing.T, endpoint string) *CassConnector {
 	t.Helper()
 	connector, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
-		"sgtstubby.arc.gwu.edu": {Endpoint: endpoint, Token: "endpoint-token"},
+		testHost(t): {Endpoint: endpoint, Token: "endpoint-token"},
 	}})
 	if err != nil {
 		t.Fatalf("NewCassConnector() error = %v", err)
@@ -144,11 +161,12 @@ func newTestCass(t *testing.T, endpoint string) *CassConnector {
 	return connector
 }
 
-func validCassStep() broker.RouteStep {
+func validCassStep(t *testing.T) broker.RouteStep {
+	t.Helper()
 	return broker.RouteStep{
 		Source:    broker.SourceCass,
 		Action:    "operations.execute",
-		Host:      "sgtstubby.arc.gwu.edu",
+		Host:      testHost(t),
 		Operation: "filesystem.read",
 		Target:    &broker.OperationTarget{Path: "/workspace/sample.txt"},
 		Params:    &broker.OperationParams{MaxBytes: 128},
@@ -250,15 +268,19 @@ func TestCassKeepsHostsIsolated(t *testing.T) {
 	type seen struct{ auth, path string }
 	got := map[string]seen{}
 
-	mk := func(name string) *httptest.Server {
+	// Each stand-in names itself, as a real agent does on every response. The
+	// connector refuses an answer from a host other than the one addressed, so
+	// a stand-in that reported nothing would be rejected before this test
+	// could observe which token it received.
+	mk := func(name, host string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got[name] = seen{auth: r.Header.Get("Authorization"), path: r.URL.Path}
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"request_id":"1","operation":"filesystem.list","status":"ok",
-				"metadata":{"truncated":false},"data":{"path":"/workspace","entries":[]}}`)
+				"metadata":{"truncated":false,"host":%q},"data":{"path":"/workspace","entries":[]}}`, host)
 		}))
 	}
-	alpha, beta := mk("alpha"), mk("beta")
+	alpha, beta := mk("alpha", "alpha.example.edu"), mk("beta", "beta.example.edu")
 	defer alpha.Close()
 	defer beta.Close()
 
@@ -300,6 +322,98 @@ func TestCassKeepsHostsIsolated(t *testing.T) {
 		}
 		if reached.auth != "Bearer token-for-"+want {
 			t.Errorf("%s was sent %q; a host must only ever receive its own token", want, reached.auth)
+		}
+	}
+}
+
+// TestCassRefusesAnAnswerFromTheWrongHost is the whole reason the agent names
+// itself.
+//
+// The endpoint for a host is operator configuration: a URL and a port. Once
+// several agents are reached through several local forwards, a transposed port
+// sends one host's question to another host's agent, and the answer comes back
+// describing the wrong machine under the right name. Nothing about it looks
+// wrong -- it parses, the operation matches, the data is real -- and it is a
+// wrong answer of the kind this project spends most of its effort preventing.
+func TestCassRefusesAnAnswerFromTheWrongHost(t *testing.T) {
+	// A perfectly healthy agent, on winston, reached by a forward that the
+	// configuration believes goes to sgtstubby.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"request_id":"1","operation":"filesystem.list","status":"ok",
+			"metadata":{"truncated":false,"host":"winston.arc.gwu.edu"},
+			"data":{"path":"/var/log","entries":[]}}`)
+	}))
+	defer server.Close()
+
+	connector, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
+		"sgtstubby.arc.gwu.edu": {Endpoint: server.URL, Token: "t"},
+	}})
+	if err != nil {
+		t.Fatalf("build connector: %v", err)
+	}
+
+	_, err = connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceCass, Action: "operations.execute",
+		Host: "sgtstubby.arc.gwu.edu", Operation: "filesystem.list",
+		Target: &broker.OperationTarget{Path: "/var/log"},
+		Params: &broker.OperationParams{MaxEntries: 10},
+	})
+	if err == nil {
+		t.Fatal("winston's filesystem was accepted as sgtstubby's; a transposed port now yields a wrong answer that looks right")
+	}
+	// The message has to name both hosts. "host mismatch" alone sends someone
+	// looking at the agent, when the fault is in the endpoint mapping.
+	for _, want := range []string{"sgtstubby.arc.gwu.edu", "winston.arc.gwu.edu"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not name %q: %v", want, err)
+		}
+	}
+}
+
+// TestCassRefusesAnAgentThatWillNotNameItself pins the unverifiable case as a
+// refusal rather than an exception. An agent too old to report a host is
+// precisely the situation the check exists for.
+func TestCassRefusesAnAgentThatWillNotNameItself(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"request_id":"1","operation":"filesystem.list","status":"ok",
+			"metadata":{"truncated":false},"data":{"path":"/var/log","entries":[]}}`)
+	}))
+	defer server.Close()
+
+	connector, err := NewCassConnector(CassConfig{Agents: map[string]CassAgentConfig{
+		"sgtstubby.arc.gwu.edu": {Endpoint: server.URL, Token: "t"},
+	}})
+	if err != nil {
+		t.Fatalf("build connector: %v", err)
+	}
+	if _, err = connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceCass, Action: "operations.execute",
+		Host: "sgtstubby.arc.gwu.edu", Operation: "filesystem.list",
+		Target: &broker.OperationTarget{Path: "/var/log"},
+		Params: &broker.OperationParams{MaxEntries: 10},
+	}); err == nil {
+		t.Fatal("an agent that named no host was trusted")
+	}
+}
+
+// TestShortHostMatching documents the deliberate looseness: a policy naming an
+// FQDN and an agent reporting the bare name are the same machine.
+func TestShortHostMatching(t *testing.T) {
+	for _, tc := range []struct {
+		planned, reported string
+		want              bool
+	}{
+		{"winston.arc.gwu.edu", "winston", true},
+		{"winston", "winston.arc.gwu.edu", true},
+		{"WINSTON.arc.gwu.edu", "winston", true},
+		{"winston.arc.gwu.edu", "sgtstubby.arc.gwu.edu", false},
+		{"winston.arc.gwu.edu", "winston2", false},
+		{"winston.arc.gwu.edu", "", false},
+	} {
+		if got := sameHost(tc.planned, tc.reported) && tc.reported != ""; got != tc.want {
+			t.Errorf("sameHost(%q, %q) = %v, want %v", tc.planned, tc.reported, got, tc.want)
 		}
 	}
 }

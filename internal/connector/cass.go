@@ -168,7 +168,8 @@ type agentOperationResponse struct {
 	Operation string `json:"operation"`
 	Status    string `json:"status"`
 	Metadata  struct {
-		Truncated bool `json:"truncated"`
+		Truncated bool   `json:"truncated"`
+		Host      string `json:"host"`
 	} `json:"metadata"`
 	Data  json.RawMessage `json:"data"`
 	Error *struct {
@@ -236,6 +237,19 @@ func (c *CassConnector) Execute(ctx context.Context, step broker.RouteStep) (Evi
 	}
 	if decoded.Operation != step.Operation {
 		return Evidence{}, newConnectorError("response_mismatch", "endpoint agent response operation did not match the approved operation")
+	}
+	// The agent names itself on every response; refuse one that came from
+	// somewhere other than the host the plan named. An agent too old to report
+	// a host is refused rather than trusted -- an unverifiable identity is the
+	// case this check exists for, not an exception to it.
+	if decoded.Metadata.Host == "" {
+		return Evidence{}, newConnectorError("host_unverified",
+			fmt.Sprintf("endpoint agent for %q did not report its hostname, so the response cannot be attributed", step.Host))
+	}
+	if !sameHost(step.Host, decoded.Metadata.Host) {
+		return Evidence{}, newConnectorError("host_mismatch",
+			fmt.Sprintf("plan addressed %q but the answering agent reports %q; the endpoint for %q points at the wrong host",
+				step.Host, decoded.Metadata.Host, step.Host))
 	}
 	if len(decoded.Data) == 0 {
 		return Evidence{}, newConnectorError("decode_response", "endpoint agent response omitted data")
@@ -383,4 +397,34 @@ func agentResponseError(status int, response agentOperationResponse) error {
 		}
 	}
 	return newConnectorError(code, fmt.Sprintf("endpoint agent returned HTTP %d", status))
+}
+
+// sameHost reports whether an agent's self-reported hostname is the host the
+// plan addressed.
+//
+// This exists because nothing else ties a response to its origin. The endpoint
+// for a host is operator configuration -- a URL and a port -- and with more
+// than one agent, and especially with SSH tunnels where several agents are
+// reached through several local ports, a transposed port produces one host's
+// filesystem returned under another host's name. That is a wrong answer in
+// the shape of a correct one: it parses, it reads sensibly, and nothing in it
+// is true of the host asked about.
+//
+// The comparison is on the first label, lowercased. A policy naming
+// winston.arc.gwu.edu and an agent reporting winston are the same machine, and
+// requiring the agent's /etc/hostname to be fully qualified would make this
+// check fail on correct configurations -- which is how checks get removed.
+// The cost is that two hosts sharing a short name in different domains would
+// compare equal. This estate has one domain; a deployment with more should
+// tighten this to an exact match and say so in the policy.
+func sameHost(planned, reported string) bool {
+	return shortHost(planned) == shortHost(reported)
+}
+
+func shortHost(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if index := strings.Index(name, "."); index >= 0 {
+		name = name[:index]
+	}
+	return name
 }

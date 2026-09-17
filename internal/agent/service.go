@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -76,6 +77,7 @@ func (s *Service) Execute(ctx context.Context, req RequestEnvelope) (ResponseEnv
 			Timestamp: start.Format(time.RFC3339Nano),
 			Agent:     agentName,
 			Version:   agentVersion,
+			Host:      selfHostname(),
 		},
 	}
 
@@ -540,3 +542,21 @@ func canonicalizeRoots(roots []string) []string {
 	}
 	return canonical
 }
+
+// selfHostname reports this host's name for the response metadata.
+//
+// Resolved once and cached: it is asked for on every response, it does not
+// change while the process runs, and a hostname lookup inside a request path
+// is a syscall nobody budgeted for.
+//
+// An error yields the empty string rather than a failure. The identity is a
+// cross-check, and a cross-check that can take the whole service down when it
+// cannot run is a worse bargain than one that declines to answer -- the
+// connector treats an unnamed host as unverifiable and says so.
+var selfHostname = sync.OnceValue(func() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return name
+})

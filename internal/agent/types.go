@@ -19,12 +19,17 @@ type ResponseEnvelope struct {
 }
 
 type ResponseMeta struct {
-	Timestamp  string         `json:"timestamp"`
-	DurationMS int64          `json:"duration_ms"`
-	Truncated  bool           `json:"truncated"`
-	Agent      string         `json:"agent"`
-	Version    string         `json:"version"`
-	Details    map[string]any `json:"details,omitempty"`
+	Timestamp  string `json:"timestamp"`
+	DurationMS int64  `json:"duration_ms"`
+	Truncated  bool   `json:"truncated"`
+	Agent      string `json:"agent"`
+	Version    string `json:"version"`
+	// Host is the agent's own hostname, on every response rather than only on
+	// capabilities.describe. It is what lets a caller prove the answer came
+	// from the host it addressed, and a check that only ran on the first call
+	// would not survive a tunnel being repointed afterwards.
+	Host    string         `json:"host"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 type ErrorPayload struct {
