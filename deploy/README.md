@@ -97,15 +97,30 @@ forward, so the connector still sees `http://127.0.0.1:<port>` and the
 `https`-unless-loopback rule is satisfied by a transport SSH has already
 encrypted and authenticated.
 
-`deploy/cassd-tunnel-winston.service` is that forward. Install it on the broker
-host:
+`deploy/cassd-tunnel-winston.user.service` is that forward. It is a **user**
+unit, because a system unit cannot run it: SELinux denies `init_t` the right to
+execute `ssh_exec_t`, and systemd reports that as `203/EXEC`, which reads as a
+missing binary. The alternative was a policy module letting every unit on the
+host exec ssh.
+
+Install as the user who owns the key:
 
 ```sh
-install -o root -g root -m 0644 \
-  /home/glenamac/dev/cassandra/deploy/cassd-tunnel-winston.service \
-  /etc/systemd/system/cassd-tunnel-winston.service
-systemctl daemon-reload && systemctl enable --now cassd-tunnel-winston
+mkdir -p ~/.config/systemd/user
+install -m 0644 ~/dev/cassandra/deploy/cassd-tunnel-winston.user.service \
+  ~/.config/systemd/user/cassd-tunnel-winston.service
+systemctl --user daemon-reload
+systemctl --user enable --now cassd-tunnel-winston
 ```
+
+Then once, as root, so the user manager survives logout and reboot:
+
+```sh
+loginctl enable-linger glenamac
+```
+
+Without lingering the forward dies when the last session ends, which is a
+failure that looks like the network.
 
 The key it uses must be restricted on the far host, in `~/.ssh/authorized_keys`:
 

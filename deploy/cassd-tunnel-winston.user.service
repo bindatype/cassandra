@@ -1,0 +1,54 @@
+[Unit]
+Description=SSH forward to the Cassandra endpoint agent on winston
+Documentation=https://github.com/bindatype/cassandra
+
+[Service]
+Type=exec
+
+# This is a USER unit, and that is not a stylistic choice.
+#
+# As a system unit it failed with 203/EXEC, which reads as "binary not found"
+# while /usr/bin/ssh was present, executable, and correctly parsed into argv.
+# The audit log gave the real reason:
+#
+#   avc: denied { execute } scontext=init_t tcontext=ssh_exec_t tclass=file
+#
+# Under Rocky's targeted policy, systemd (init_t) may not execute the ssh
+# client (ssh_exec_t) at all. The alternative was a policy module granting
+# `allow init_t ssh_exec_t:file execute`, which would let every unit on the
+# host exec ssh in order to fix one tunnel. A user service runs in the calling
+# user's own domain instead, so the transition never arises -- and it runs as
+# the user who owns the key, which is where it belonged anyway.
+#
+# NoNewPrivileges is deliberately absent. It was briefly blamed for the 203
+# above and was not the cause, but it does block SELinux domain transitions,
+# and ssh has one; leaving it off avoids trading this failure for a subtler one.
+
+# StrictHostKeyChecking=yes is load-bearing. This transport is http-over-ssh
+# rather than https, and what makes that defensible is SSH authenticating the
+# far host. Accepting a changed key would remove the only thing standing in for
+# a certificate, so a changed key must fail and keep failing rather than
+# reconnect to whatever is now answering.
+#
+# ExitOnForwardFailure=yes so a session that authenticates but cannot open the
+# forward dies and is restarted, rather than sitting there carrying nothing.
+# Without it the unit reports active while every question through it fails.
+#
+# ServerAlive* notices a peer that went away without closing the socket within
+# about ninety seconds.
+ExecStart=/usr/bin/ssh -N \
+    -o BatchMode=yes \
+    -o IdentitiesOnly=yes \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -i %h/.ssh/id_cass_tunnel \
+    -L 8101:127.0.0.1:8099 \
+    glenamac@winston.arc.gwu.edu
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
