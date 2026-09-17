@@ -444,12 +444,31 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 
 		result, failure := s.runOneCall(ctx, call)
 		if failure != nil {
-			// A refusal is an answer and ends the loop. A malformed call or a
-			// failed query is something the model can correct, so it goes back
-			// as a tool result and the loop continues.
-			if !failure.recoverable {
+			// A refusal is an answer, but only while there is nothing else to
+			// say. Asked what kernel winston runs, the model fetched host
+			// facts, got them, then speculatively asked for a resource
+			// authorized on a different host -- and that denial discarded the
+			// evidence already in hand and failed the whole question. The
+			// policy did its job both times; the loop threw away the half that
+			// worked.
+			//
+			// So a refusal still ends the loop when it is all that happened:
+			// someone who asks for something forbidden should be told, not
+			// given a vague answer assembled around it. Once evidence has been
+			// collected, the refusal becomes a correctable mistake like any
+			// other, and the model answers from what it has and says what it
+			// could not get.
+			//
+			// Nothing is loosened by this. The broker refused the call; the
+			// only question is whether the refusal also destroys unrelated
+			// work that was already authorized and already done.
+			if !failure.recoverable && succeeded == 0 {
 				s.event.Decision = "denied"
 				return "", failure.err
+			}
+			if !failure.recoverable {
+				s.record("denied_after_evidence",
+					"a later call was refused; answering from the evidence already collected", false)
 			}
 			failed++
 			lastError = failure.err.Error()

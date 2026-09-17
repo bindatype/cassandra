@@ -571,3 +571,45 @@ func TestAuditCapsALongAnswer(t *testing.T) {
 		t.Fatalf("answer_chars = %d, want the true length %d", event.AnswerChars, len(answer))
 	}
 }
+
+// TestDenialAfterEvidenceStillAnswers pins the behaviour that cost a working
+// answer: the model fetched evidence successfully, then speculatively asked
+// for something the policy does not allow, and the refusal discarded the
+// evidence already in hand and failed the whole question.
+//
+// The policy refused the second call in both versions. The only thing that
+// changed is whether the refusal also destroys unrelated work that was already
+// authorized and already done.
+func TestDenialAfterEvidenceStillAnswers(t *testing.T) {
+	var turns int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.ReadAll(r.Body)
+		turns++
+		switch turns {
+		case 1: // a call the policy allows
+			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+				{"id":"c1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}
+			]}}]}`)
+		case 2: // then one it does not
+			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+				{"id":"c2","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"live.evidence\",\"host\":\"node02\",\"resource\":\"nope\"}"}}
+			]}}]}`)
+		default: // and answers from what it got
+			io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"node02 is disconnected. The second lookup was refused."}}]}`)
+		}
+	}))
+	defer server.Close()
+
+	session := newTestSession(t, server.URL, &fakeConnector{source: broker.SourceWazuhAPI})
+
+	answer, err := session.Ask(context.Background(), "is node02 healthy?")
+	if err != nil {
+		t.Fatalf("a refusal after successful evidence failed the whole question: %v", err)
+	}
+	if !strings.Contains(answer, "disconnected") {
+		t.Errorf("answer lost the evidence that was collected: %q", answer)
+	}
+	if turns < 3 {
+		t.Errorf("model turns = %d; the refusal should have gone back as a tool result", turns)
+	}
+}
