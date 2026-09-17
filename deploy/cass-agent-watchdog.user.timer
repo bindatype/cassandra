@@ -1,0 +1,16 @@
+[Unit]
+Description=Probe the Cassandra endpoint agents every five minutes
+Documentation=https://github.com/bindatype/cassandra
+
+[Timer]
+# Five minutes against a three-failure threshold means a sustained outage is
+# reported within about fifteen. cassd restarts in five seconds and the forward
+# in ten, so anything shorter mostly reports restarts in flight -- and an alarm
+# that cries wolf gets muted, which costs more than the delay.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

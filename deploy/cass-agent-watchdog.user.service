@@ -1,0 +1,23 @@
+[Unit]
+Description=Probe every configured Cassandra endpoint agent
+Documentation=https://github.com/bindatype/cassandra
+
+[Service]
+Type=oneshot
+
+# A user unit for the same reason the tunnel is one: it runs ssh indirectly
+# through nothing, but it does build cass-notify with go, and it reads the
+# broker's own environment file. It belongs to the user who owns that
+# configuration rather than to init.
+#
+# No Environment= or EnvironmentFile= here on purpose: the script sources
+# ~/.config/cass/env itself, so it behaves identically under a timer, under
+# cron, and from a shell. An earlier version of this comment claimed the
+# library did that, and the first run under the timer exited 2 complaining
+# about a variable that was set in a file nobody had read.
+ExecStart=/bin/sh %h/dev/cassandra/bin/cass-agent-watchdog.sh
+
+# A failing probe exits non-zero on purpose, so the unit is expected to fail
+# when an agent is down. That is the signal, not a malfunction: `systemctl
+# --user status` and the journal both show which agent and why.
+SuccessExitStatus=0 1
