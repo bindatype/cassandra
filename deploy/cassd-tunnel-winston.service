@@ -39,7 +39,17 @@ ExecStart=/usr/bin/ssh -N \
 Restart=always
 RestartSec=10
 
-NoNewPrivileges=yes
+# NoNewPrivileges is deliberately NOT set here, which is unusual enough to say
+# why. It sets PR_SET_NO_NEW_PRIVS, and the kernel then refuses any SELinux
+# domain transition that would grant privilege. /usr/bin/ssh is labelled
+# ssh_exec_t and carries such a transition, so with SELinux enforcing the exec
+# is denied outright and systemd reports 203/EXEC -- a failure that reads as
+# "binary not found" while the binary is present and executable.
+#
+# Little is given up. This is an ssh client run as an ordinary user with no
+# setuid helpers in its path; the confinement that matters here is the
+# restricted key on the far host, which limits what the session can do no
+# matter what the local process could.
 PrivateTmp=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
