@@ -573,3 +573,53 @@ func TestRTDateBoundRendersInRTsZone(t *testing.T) {
 		}
 	}
 }
+
+// TestTicketOrderFollowsTheBound pins which end of a truncated page the reader
+// gets. 73% of ticket searches truncate, so for most questions this decides
+// which tickets are seen at all.
+func TestTicketOrderFollowsTheBound(t *testing.T) {
+	for _, tc := range []struct {
+		name, since, until, want string
+	}{
+		{"older-than asks for the oldest", "", "2026-07-01T00:00:00Z", "ASC"},
+		{"since asks for the newest", "2026-09-01T00:00:00Z", "", "DESC"},
+		{"unbounded is a question about now", "", "", "DESC"},
+		// A window names both ends, and the newer one is the live edge; a
+		// reader asking about a window is not asking to start at its far end.
+		{"a window keeps the recent end", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "DESC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ticketOrder(tc.since, tc.until); got != tc.want {
+				t.Errorf("ticketOrder(%q, %q) = %q, want %q", tc.since, tc.until, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSearchSendsRTsOwnOrderingSyntax guards the mistake itself. RT does not
+// reject orderby=-Created; it ignores it and returns its default order, so the
+// bug was invisible in every response.
+func TestSearchSendsRTsOwnOrderingSyntax(t *testing.T) {
+	var got url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"total":0,"items":[]}`)
+	}))
+	defer server.Close()
+
+	connector, err := NewRTConnector(RTConfig{Endpoint: server.URL, Token: "t", Queues: []string{"q"}})
+	if err != nil {
+		t.Fatalf("NewRTConnector() error = %v", err)
+	}
+	if _, _, err := connector.search(context.Background(), "Status = 'open'", 10, "ASC"); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if got.Get("orderby") != "Created" {
+		t.Errorf("orderby = %q, want the bare field name; RT silently ignores a signed one", got.Get("orderby"))
+	}
+	if got.Get("order") != "ASC" {
+		t.Errorf("order = %q, want ASC as a separate parameter", got.Get("order"))
+	}
+}

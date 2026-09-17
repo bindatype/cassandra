@@ -173,7 +173,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 
 	query := ticketSearchQuery(step.Host, "", since, until, c.queues)
 	requestedAt := time.Now().UTC()
-	items, total, err := c.search(ctx, query, limit)
+	items, total, err := c.search(ctx, query, limit, ticketOrder(since, until))
 	if err != nil {
 		return Evidence{}, err
 	}
@@ -296,7 +296,23 @@ func rtDateBound(value string, loc *time.Location) (string, error) {
 
 // search runs one bounded ticket search and returns normalized items plus the
 // true count RT reports for the query, not just the page.
-func (c *RTConnector) search(ctx context.Context, query string, limit int) ([]EvidenceItem, int, error) {
+// ticketOrder chooses which end of the matching set a truncated page should
+// show.
+//
+// An `until` bound asks about tickets older than something, so the oldest are
+// the answer and the newest are noise. Anything else -- an open `since`, or no
+// bound at all -- is a question about current state, where recent activity
+// belongs at the top. The direction is taken from the bound rather than from
+// the question because the connector never sees the question, and the bound is
+// the part of it that survived into the plan.
+func ticketOrder(since, until string) string {
+	if until != "" && since == "" {
+		return "ASC"
+	}
+	return "DESC"
+}
+
+func (c *RTConnector) search(ctx context.Context, query string, limit int, order string) ([]EvidenceItem, int, error) {
 	values := url.Values{}
 	values.Set("query", query)
 	values.Set("fields", rtSearchFields)
@@ -305,9 +321,20 @@ func (c *RTConnector) search(ctx context.Context, query string, limit int) ([]Ev
 	// operator, and every other part of this connector, means "alerts".
 	values.Set(rtQueueNameField, "Name")
 	values.Set("per_page", strconv.Itoa(limit))
-	// Newest first: a reader asking what is open wants the most recent activity
-	// at the top, not whatever order the ticket IDs happen to sort in.
-	values.Set("orderby", "-Created")
+	// RT REST 2.0 takes the field and the direction as separate parameters.
+	// This was `orderby=-Created`, which RT does not reject -- it ignores it
+	// and returns its own default order. So every truncated page was an
+	// arbitrary subset of the matches rather than a defined end of them:
+	// measured against the live instance, `-Created` returned tickets spanning
+	// 2022 to 2026 while `Created`+`DESC` returned only the last three days.
+	//
+	// 73% of ticket searches truncate, so this was most of them. The counts
+	// were never affected -- queueCensus and ownerCensus ask RT directly -- but
+	// "here are the open tickets" showed an arbitrary hundred of several
+	// hundred, and a question about the longest-waiting got four years of
+	// spread with no indication that the oldest were missing.
+	values.Set("orderby", "Created")
+	values.Set("order", order)
 
 	body, status, err := c.get(ctx, "/REST/2.0/tickets", values)
 	if err != nil {
