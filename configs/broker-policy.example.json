@@ -12,6 +12,12 @@
         "log-dir",
         "log-dir-metadata"
       ]
+    },
+    "winston.arc.gwu.edu": {
+      "resources": [
+        "log-dir",
+        "log-dir-metadata"
+      ]
     }
   },
   "resources": {
