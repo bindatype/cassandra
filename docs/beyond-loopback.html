@@ -9,14 +9,15 @@
   second artifact, and the link already circulated would then go stale while
   looking fine.
 
-  Rev 3. Rev 2 corrected four claims raised in external review -- all five of
+  Rev 4. Rev 3 records the route actually taken -- an SSH forward, which
+  neither of the memo's two routes described -- and the five defects that
+  wiring it exposed. Rev 2 corrected four claims raised in external review -- all five of
   that review's findings held up against the code, and the corrections are
   marked in the page rather than folded in silently, so a returning reviewer
   can see what moved.
 
   No <!DOCTYPE>, <html>, <head> or <body> here on purpose: the publisher wraps
   the file in that skeleton, and a second set nests the document inside itself.
--->
 <title>Beyond Loopback</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -376,31 +377,72 @@
 <header class="masthead">
   <p class="eyebrow">Cassandra · decision memo</p>
   <h1>Beyond Loopback</h1>
-  <p class="standfirst">The endpoint agent works. Everything that makes it comfortable is the fact that it never touches a wire — and the second host is where that stops being true.</p>
+  <p class="standfirst">The endpoint agent reached a second host. It got there by a route this memo did not list, and wiring it turned up five defects, none of them in the thing being wired.</p>
   <div class="byline">
-    <span><b>Status</b> deployed, sgtstubby</span>
-    <span><b>Open</b> transport for host two</span>
+    <span><b>Status</b> two hosts, answering</span>
+    <span><b>Route taken</b> SSH forward, not A or B</span>
     <span><b>For review</b> Codex, Gemini</span>
-    <span><b>Rev 2</b> after review</span>
-    <span><b>2026-09-16</b></span>
+    <span><b>Rev 3</b> 2026-09-17</span>
   </div>
 </header>
 
 <section>
   <h2>Where it stands</h2>
   <p class="deck">Measured, not estimated</p>
-  <p><code>cassd</code> runs on sgtstubby as a systemd service and answers <code>live.evidence</code> — the intent the README has promised since Phase One with nothing behind it. It lists and stats paths under two roots, and does nothing else.</p>
+  <p><code>cassd</code> runs on sgtstubby and winston as a systemd service and answers <code>live.evidence</code> — the intent the README promised since Phase One with nothing behind it. It reports host facts, lists and stats paths under two roots, and tails one named file. It does nothing else, and it writes nothing anywhere.</p>
 
   <dl class="verdict">
-    <div><dt>Exposure</dt><dd>1.1 <small>systemd-analyze, “OK”</small></dd></div>
-    <div><dt>Identity</dt><dd>DynamicUser <small>no groups, owns nothing</small></dd></div>
-    <div><dt>Operations</dt><dd>3 <small>describe, list, stat</small></dd></div>
+    <div><dt>Hosts</dt><dd>2 <small>sgtstubby, winston</small></dd></div>
+    <div><dt>Exposure</dt><dd>1.1 <small>systemd-analyze, “OK”, both</small></dd></div>
+    <div><dt>Operations</dt><dd>5 <small>+ host.info, tail</small></dd></div>
     <div><dt>Anonymous</dt><dd>401 <small>fails closed</small></dd></div>
   </dl>
 
   <p>The filesystem is read-only in the service's own mount namespace via <code>ProtectSystem=strict</code>, and <code>@mount</code> is denied outright — so the daemon cannot mount anything even if a later change tries to. That is a stronger statement than mounting things read-only itself, and it does not depend on the code continuing to have no write path, which it currently does not outside its audit log.</p>
 
   <p>What it can reach is bounded by ordinary Unix permissions rather than by policy alone. <code>/var/log</code> is <code>0755</code>, so the directory lists; <code>/var/log/messages</code> and <code>/var/log/secure</code> are <code>0600 root:root</code>, so they do not open. Reading those would be a deliberate grant — a <code>SupplementaryGroups=</code> line — and it should be argued on its own rather than inherited from a deployment.</p>
+</section>
+
+<section>
+  <h2>What happened, 2026-09-17</h2>
+  <p class="deck">The fork was resolved by a third path</p>
+
+  <p>Neither Route A nor Route B was built. The agent reached its second host over an <strong>SSH forward</strong>: <code>cassd</code> on winston binds its own loopback, and the broker connects to <code>127.0.0.1:8101</code> on sgtstubby. The connector's <code>https</code>-unless-loopback rule is satisfied literally, and the transport is encrypted and the far host authenticated — by SSH, rather than by a certificate authority nobody has stood up.</p>
+
+  <div class="note">
+    <span class="lede">Why it won on the day</span>
+    <p><strong>No new code.</strong> Both memo routes are net-new implementation; this one required none. <strong>SSH host-key verification</strong> is real authentication of the far host and is already operated here. <strong>The key can be bounded harder than the credential it carries</strong> — <code>restrict,port-forwarding,command="/bin/false",permitopen="127.0.0.1:8099"</code> yields a key that can open one port on one host and do nothing else, not even log in.</p>
+    <p>It forecloses nothing. When a CA exists, endpoints change and the forwards go.</p>
+  </div>
+
+  <p>What is answerable now, that no other connector covers: the kernel and uptime of each host, when each was last patched and with what, and therefore which hosts are drifting. The first real finding arrived immediately — sgtstubby runs <code>5.14.0-687.26.1</code> against winston's <code>687.31.1</code>.</p>
+
+  <h3>Wrong answers, made loud</h3>
+  <p>The port map now lives in two places: the tunnel unit and <code>CASS_AGENT_CONFIG</code>. Transpose them and one host's filesystem returns under another host's name — an answer that parses, reads sensibly, and is false throughout.</p>
+  <p>So the agent reports its hostname in the metadata of <em>every</em> response, and the connector refuses a reply from anywhere but the host the plan named. Verified by doing it deliberately: pointing sgtstubby's entry at winston's forward produces <em>“the endpoint for that host is incorrectly pointing to a host reporting as winston”</em> rather than an answer. A check that only ran at startup would not have survived a forward being repointed afterwards, which is exactly when this goes wrong.</p>
+</section>
+
+<section>
+  <h2>Five defects, none in the feature</h2>
+  <p class="deck">What wiring one operation exposed</p>
+
+  <div class="tablewrap">
+    <table>
+      <caption>Each was found by using the system, not by reading it.</caption>
+      <thead><tr><th>Defect</th><th>How it presented</th></tr></thead>
+      <tbody>
+        <tr><td><code>host.info</code> was unroutable</td><td>Path validated before operation, so “no path” failed as <em>“path must be absolute”</em></td></tr>
+        <tr><td>A later refusal destroyed earlier evidence</td><td>A successful call discarded because a speculative follow-up was denied</td></tr>
+        <tr><td>An oversized result left no trace entry</td><td><code>intent_proposed → policy_allowed → nothing</code></td></tr>
+        <tr><td>The tool description refused a granted capability</td><td>Prose beside a generated enum; the model never consulted the enum</td></tr>
+        <tr><td><code>ProcSubset=pid</code> removed two of six fields</td><td><code>/proc/uptime</code> and <code>/proc/version</code> unreadable; unreadable fields are skipped silently</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>Four of the five are one shape.</strong> Something was missing and the system reported it as something that did not exist. A discarded result looked like no result; a blocked <code>/proc</code> read looked like an unsupported field; a stale description looked like an unsupported capability. Each failed closed — correct for safety, and close to useless for diagnosis, because a capability that is absent and a capability that is broken produce the same sentence.</p>
+
+  <p>The refusal case is the one with a real trade in it. A refusal ends the loop when it is all that happened, because somebody who asks for something forbidden should be told so. Once evidence has been collected, the same refusal became a correctable mistake — the broker still refused the call, and the only change is whether that refusal also destroys unrelated work already authorized and already done.</p>
 </section>
 
 <section>
@@ -483,10 +525,14 @@ SocketMode=0600          # nobody else can even connect
   <p>They are not exclusive. The agent could support both, and the local deployment would take Route A while remote ones take Route B. That is also a decision, and not a free one: two transports is two code paths, two failure modes, and two things to get right in the connector's endpoint validation.</p>
 
   <div class="corrected">
-    <span class="lede">Neither route exists yet</span>
-    <p><code>cassd</code> serves over TCP and nothing else — there is no Unix-socket listener, no TLS listener, and no certificate configuration. The connector speaks HTTP(S) only. The <code>https</code> rule it enforces is a <em>client-side refusal to be configured badly</em>, not remote TLS support.</p>
-    <p>So both routes are net-new implementation, and the choice is about which to build rather than which to enable. Rev 1 read as though Route B were closer to done than Route A; it is not.</p>
+    <span class="lede">Neither was built — a third route was</span>
+    <p><code>cassd</code> still serves over TCP and nothing else: no Unix-socket listener, no TLS listener, no certificate configuration. Both routes above remain net-new implementation.</p>
+    <p>An SSH forward reached the second host without either. It is not a substitute for Route B at scale — every host needs a forward, a restricted key and a port, and the port map can drift — but it answered the question that mattered first: <em>is per-host filesystem evidence worth building a CA for?</em> That is now answerable from data rather than argument.</p>
   </div>
+
+  <h3>Route C, in practice</h3>
+  <p>What it costs, having done it: one <code>.socket</code>-free user unit per host, one restricted key, one local port, and a hostname cross-check to make a transposed port loud. What it does not cost: a certificate authority, a TLS listener in the agent, or any change to the connector.</p>
+  <p>It also exposed an option the memo had not considered. The tunnel could not run as a system unit at all — SELinux denies <code>init_t</code> the right to execute <code>ssh_exec_t</code>, reported as <code>203/EXEC</code>, which reads as a missing binary. A user service runs in the calling user's domain and sidesteps it, and happens to run as the user who owns the key, which is where it belonged.</p>
 </section>
 
 <section>
@@ -520,8 +566,12 @@ SocketMode=0600          # nobody else can even connect
   <p>Rev 1 drew five findings, all of which held up against the code. Four are corrected above and one — a README still asserting no agent was deployed — is fixed in the repository. The questions below are unchanged except where those corrections bear on them.</p>
   <ol class="questions">
     <li>
+      <p class="q">Does Route C scale, or is it a two-host answer?</p>
+      <p class="why">It works and it cost no code. But each host adds a forward, a key, a port and a second place for that port to be recorded. At what host count does the bookkeeping exceed the cost of a CA? The cross-check makes drift loud rather than silent, which raises that number — it does not remove it.</p>
+    </li>
+    <li>
       <p class="q">Is a dual transport worth two code paths?</p>
-      <p class="why">Route A is strictly better where it applies and useless where it does not. The alternative is TLS everywhere including loopback, paying 0.8 of exposure and a certificate on every host to keep one code path. Both are unbuilt, so this is a question about what to write, not what to switch on — though socket activation makes Route A markedly cheaper than it first appears.</p>
+      <p class="why">Unchanged, and now less urgent. Route A is strictly better where it applies and useless where it does not; socket activation makes it cheaper than it first appears. Route C occupies the ground that was forcing the question.</p>
     </li>
     <li>
       <p class="q">Does mTLS belong in the first remote deployment or the second?</p>
@@ -537,9 +587,16 @@ SocketMode=0600          # nobody else can even connect
     </li>
     <li>
       <p class="q">What is the monitoring story for the monitor?</p>
-      <p class="why">A stopped agent spends a turn and returns an error the model must handle, on every question that routes to it. The existing morning digest and its watchdog are the obvious hook, and neither knows about agents yet.</p>
+      <p class="why">A stopped agent spends a turn and returns an error on every question that routes to it, and there are now two agents and a tunnel between them. The forward self-heals within ten seconds — tested by killing it — but nothing notices if it stops healing. The morning digest and its watchdog are the obvious hook and neither knows agents exist.</p>
     </li>
   </ol>
+</section>
+
+<section>
+  <h2>One habit worth reviewing</h2>
+  <p class="deck">Not a defect, and probably the most transferable thing here</p>
+  <p>Three things were sized today by reasoning rather than measurement, and all three were wrong in the direction that looks fine until it is used. A hardening change predicted to clear 0.4 of exposure cleared 0.1. A tail sized at 49152 bytes produced a 101151-byte response against a 65536-byte cap and was discarded whole. A forward-only SSH key was declared working on the evidence that a local listener had appeared, which happens whether the forward is permitted or forbidden.</p>
+  <p>Each was one command away from being checked. The corresponding question for a reviewer is not about this system: <strong>which of your own checks measure a proxy for the property rather than the property?</strong> A listener is not a channel, an exit code is not an answer, and a unit file that parses is not a service that runs.</p>
 </section>
 
 <section>
@@ -549,9 +606,14 @@ SocketMode=0600          # nobody else can even connect
 systemd-analyze security cassd | tail -2
 systemd-analyze security cassd | grep "✗"
 
-# the functional check, which matters more than the score
-askcass "list the files in /var/log on sgtstubby"</code></pre>
-  <p>Deployed configuration is <code>CASS_ALLOWED_ROOTS=/var/log,/tmp</code> and <code>CASS_ENABLED_OPERATIONS=capabilities.describe,filesystem.list,filesystem.stat</code>, bound to <code>127.0.0.1:8099</code>. The unit, the environment template and the install runbook are in <code>deploy/</code>.</p>
+# the functional checks, which matter more than the score
+askcass "list the files in /var/log on sgtstubby"
+askcass "what kernel is winston.arc.gwu.edu running, and how long has it been up?"
+askcass "compare the kernel versions on sgtstubby.arc.gwu.edu and winston.arc.gwu.edu"
+
+# and the negative one: point a host's name at another host's forward.
+# It must refuse, naming both hosts, rather than answer.</code></pre>
+  <p>Deployed configuration on both hosts is <code>CASS_ALLOWED_ROOTS=/var/log,/tmp</code> and <code>CASS_ENABLED_OPERATIONS=capabilities.describe,host.info,filesystem.list,filesystem.stat,filesystem.tail</code>, bound to <code>127.0.0.1:8099</code>. The unit, the environment template and the install runbook are in <code>deploy/</code>.</p>
 </section>
 
 <footer>
