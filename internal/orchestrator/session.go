@@ -513,6 +513,15 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			return "", fmt.Errorf("encode evidence: %w", err)
 		}
 		if len(evidenceJSON) > evidenceBudget() {
+			// Recorded, because it was not. An oversized result was discarded
+			// with no trace entry at all: the trace showed intent_proposed,
+			// policy_allowed, and then nothing -- a call that was authorized
+			// and then stopped existing. Debugging it meant measuring the
+			// agent's response by hand to discover the result had been thrown
+			// away for being 101 KB against a 64 KB cap.
+			s.record("evidence_too_large",
+				fmt.Sprintf("%d bytes exceeds the %d-byte per-result cap; the whole result was discarded, not truncated",
+					len(evidenceJSON), evidenceBudget()), false)
 			messages = append(messages, Message{
 				Role: "tool", ToolCallID: call.ID, Name: toolName,
 				Content: `{"error":"the result was too large to return; narrow it or aggregate in SQL"}`,

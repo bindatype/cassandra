@@ -52,7 +52,7 @@
       "operation": "filesystem.tail",
       "path": "/var/log/dnf.rpm.log",
       "params": {
-        "max_bytes": 49152
+        "max_bytes": 24576
       }
     }
   }
