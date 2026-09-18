@@ -182,20 +182,79 @@ func TestNetworkAsksForAddressesAndRoutesBoth(t *testing.T) {
 	}
 }
 
-// The commands that need a privilege grant must not be present. Shipping one
-// under the current sandbox means exit 0 and a well-formed answer describing
-// almost nothing.
-func TestSandboxBlockedCommandsAreNotShipped(t *testing.T) {
-	blocked := []string{"journalctl", "dmesg", "/ps", "/ss"}
+// Commands needing a privilege grant must not be shipped in a state where they
+// can only return empty or partial output. This was one blanket rule; the
+// grants turned out to differ, so it is now three specific ones.
+func TestGrantRequiringCommandsAreNotShippedBlind(t *testing.T) {
+	// journalctl needs SupplementaryGroups=systemd-journal, and ps needs
+	// ProtectProc dropped. Neither grant has been made, and both would exit 0
+	// while describing almost nothing.
 	for operation, steps := range commandOperations {
 		for _, step := range steps {
-			for _, name := range blocked {
-				if strings.Contains(step.Path, name) {
-					t.Errorf("%s runs %q, which returns empty or partial output under cassd's "+
-						"sandbox (ProtectKernelLogs, ProtectProc=invisible, no SupplementaryGroups). "+
-						"It needs a deliberate privilege grant first.", operation, step.Path)
+			for _, forbidden := range []string{"journalctl", "/ps"} {
+				if strings.Contains(step.Path, forbidden) {
+					t.Errorf("%s runs %q, which needs a privilege grant that has not been made; "+
+						"it would exit 0 describing almost nothing", operation, step.Path)
 				}
 			}
+		}
+	}
+
+	// ss may ship, but never with -p: attribution is reported only for the
+	// caller's own sockets, and this agent owns almost none, so -p yields a
+	// blank process column on a list that otherwise looks complete.
+	for operation, steps := range commandOperations {
+		for _, step := range steps {
+			if !strings.Contains(step.Path, "/ss") {
+				continue
+			}
+			for _, arg := range step.Args {
+				if strings.Contains(arg, "p") && strings.HasPrefix(arg, "-") {
+					t.Errorf("%s runs ss with %q; -p attributes only the caller's own sockets, "+
+						"so it returns a blank process column rather than an absent one", operation, arg)
+				}
+			}
+		}
+	}
+
+	// dmesg may be implemented, but must not be enabled by default: the
+	// shipped unit sets ProtectKernelLogs=yes, so a default-on kernel.messages
+	// could only ever refuse.
+	for _, name := range defaultEnabledOperations() {
+		if name == operationKernelMessages {
+			t.Errorf("%s is enabled by default, but ProtectKernelLogs=yes in the shipped unit "+
+				"means it can only refuse until that grant is made", name)
+		}
+	}
+}
+
+// Every command-backed operation that ships enabled must be one the sandbox
+// actually permits, or the default configuration advertises what it cannot do.
+func TestDefaultEnabledCommandOperationsNeedNoGrant(t *testing.T) {
+	grantFree := map[string]bool{
+		operationHostUptime:    true,
+		operationHostDiskFree:  true,
+		operationHostNetwork:   true,
+		operationHostListeners: true,
+	}
+	for _, name := range defaultEnabledOperations() {
+		if _, isCommand := commandOperations[name]; !isCommand {
+			continue
+		}
+		if !grantFree[name] {
+			t.Errorf("%s runs a program and is enabled by default, but is not on the "+
+				"grant-free list; either it needs no grant and belongs there, or it "+
+				"must not ship enabled", name)
+		}
+	}
+}
+
+// A limit a reader would otherwise have to discover must travel with the
+// result. A socket list with no process column looks complete.
+func TestOperationsWithHiddenLimitsCarryNotes(t *testing.T) {
+	for _, operation := range []string{operationHostListeners, operationKernelMessages} {
+		if len(operationNotes[operation]) == 0 {
+			t.Errorf("%s has a limit that is invisible in its output but carries no note", operation)
 		}
 	}
 }

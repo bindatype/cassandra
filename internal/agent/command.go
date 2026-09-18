@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -39,6 +41,21 @@ const (
 // `df -h` misses a filesystem that is out of inodes at 40% capacity, and
 // asking only `ip addr` misses the route that explains why a reachable-looking
 // interface answers nothing.
+// operationNotes are limits a reader would otherwise have to discover. They
+// travel with the result, because a socket list with no process column looks
+// complete rather than partial.
+var operationNotes = map[string][]string{
+	operationHostListeners: {
+		"process attribution is NOT included: ss -p reports only sockets owned by the calling " +
+			"user, and this agent owns almost none, so a process column would be blank rather " +
+			"than absent. Do not conclude a port has no owner.",
+	},
+	operationKernelMessages: {
+		"only error and warning level entries are returned, and the ring buffer holds a bounded " +
+			"window: an event older than the buffer is absent, not non-existent.",
+	},
+}
+
 type commandStep struct {
 	// Label names the step in the response, so a reader can tell which output
 	// came from which invocation without parsing argv.
@@ -58,6 +75,20 @@ var commandOperations = map[string][]commandStep{
 	operationHostNetwork: {
 		{Label: "addresses", Path: "/usr/sbin/ip", Args: []string{"addr", "show"}},
 		{Label: "routes", Path: "/usr/sbin/ip", Args: []string{"route", "show"}},
+	},
+	// -p is deliberately absent. It attributes sockets to processes, but only
+	// for the calling user's own, and this agent owns almost none -- so -p
+	// would return a blank process column on a list that otherwise looks
+	// complete. Attribution needs a privilege grant; until then, saying
+	// nothing beats saying nothing convincingly.
+	operationHostListeners: {
+		{Label: "listeners", Path: "/usr/sbin/ss", Args: []string{"-tuln"}},
+	},
+	// Blocked by ProtectKernelLogs=yes in the shipped unit, and by
+	// kernel.dmesg_restrict=1 on hosts that set it. Both failures are refusals
+	// with stderr, not empty successes, so the operation reports why.
+	operationKernelMessages: {
+		{Label: "kernel", Path: "/usr/bin/dmesg", Args: []string{"-T", "--level=err,warn"}},
 	},
 }
 
@@ -107,9 +138,20 @@ func (s *Service) runCommandOperation(ctx context.Context, operation string) (an
 	}
 
 	if !anyOutput {
+		// Name the cause rather than only the symptom. dmesg refused by
+		// ProtectKernelLogs and dmesg on a quiet machine both produce no
+		// output, and the stderr is the only thing that tells them apart.
+		detail := "every step ran and none produced output"
+		for _, result := range results {
+			if result.Failure != "" || result.Stderr != "" {
+				detail = fmt.Sprintf("%s: %s", result.Label,
+					strings.TrimSpace(result.Failure+" "+result.Stderr))
+				break
+			}
+		}
 		return nil, false, newAPIError(502, "command_produced_nothing",
-			"every step ran and none produced output; this is reported as a failure rather than "+
-				"an empty result, because an empty result would read as the machine having nothing to report")
+			detail+"; reported as a failure rather than an empty result, because an empty "+
+				"result would read as the machine having nothing to report")
 	}
 
 	truncated := false
@@ -118,7 +160,11 @@ func (s *Service) runCommandOperation(ctx context.Context, operation string) (an
 			truncated = true
 		}
 	}
-	return map[string]any{"steps": results}, truncated, nil
+	payload := map[string]any{"steps": results}
+	if notes := operationNotes[operation]; len(notes) > 0 {
+		payload["notes"] = notes
+	}
+	return payload, truncated, nil
 }
 
 func (s *Service) runCommandStep(ctx context.Context, step commandStep) commandResult {

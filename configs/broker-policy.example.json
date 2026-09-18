@@ -15,7 +15,8 @@
         "host-facts",
         "host-uptime",
         "host-diskfree",
-        "host-network"
+        "host-network",
+        "host-listeners"
       ]
     },
     "winston.arc.gwu.edu": {
@@ -26,7 +27,8 @@
         "host-facts",
         "host-uptime",
         "host-diskfree",
-        "host-network"
+        "host-network",
+        "host-listeners"
       ]
     }
   },
@@ -74,6 +76,9 @@
     },
     "host-network": {
       "operation": "host.network"
+    },
+    "host-listeners": {
+      "operation": "host.listeners"
     }
   }
 }

@@ -18,6 +18,8 @@ The compiled operation catalog is deliberately narrow:
 - `host.uptime`
 - `host.diskfree`
 - `host.network`
+- `host.listeners`
+- `kernel.messages`
 - `filesystem.list`
 - `filesystem.stat`
 - `filesystem.read`
@@ -37,6 +39,14 @@ is emptied rather than inherited, and output is capped at the agent.
 `host.diskfree` runs both `df -h` and `df -i` because a filesystem can
 exhaust either alone, and `host.network` runs both `ip addr show` and
 `ip route show`.
+
+`host.listeners` runs `ss -tuln` and deliberately omits `-p`: attribution is
+reported only for the calling user's own sockets, so `-p` would yield a blank
+process column on a list that otherwise looks complete. `kernel.messages` runs
+`dmesg` and is implemented but **not enabled by default**, because the shipped
+unit sets `ProtectKernelLogs=yes` and it could only refuse until that grant is
+made. Both carry a `notes` entry stating the limit, so a reader does not have
+to discover it.
 
 Core constraints:
 

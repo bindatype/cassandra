@@ -107,7 +107,8 @@ func (s *Service) Execute(ctx context.Context, req RequestEnvelope) (ResponseEnv
 			data, truncated, apiErr = s.filesystemTail(req)
 		case operationProcessList:
 			data, truncated, apiErr = s.processList()
-		case operationHostUptime, operationHostDiskFree, operationHostNetwork:
+		case operationHostUptime, operationHostDiskFree, operationHostNetwork,
+			operationHostListeners, operationKernelMessages:
 			data, truncated, apiErr = s.runCommandOperation(ctx, req.Operation)
 		}
 	}

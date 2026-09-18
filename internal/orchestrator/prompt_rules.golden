@@ -74,6 +74,11 @@ the check did NOT run and you know nothing about which agents are critical.
 Evidence may also carry a `warnings` list. A warning names a check that did not
 run, and it is a defect in the answer, not a footnote to it. State it in your
 first sentence, before any count.
+Evidence from a command-backed operation may carry a `notes` list. A note names
+a limit that is invisible in the output itself -- `host.listeners` reports no
+process attribution, so a port with no owner shown is a port whose owner was not
+looked up, not a port without one. Repeat such a limit in the answer when it
+bears on what was asked; do not present the output as if the limit were absent.
 **Lead with the broken thing, not with the true "no".** When the literal answer
 to a narrow question is "nothing", and the evidence also shows machines in that
 same state right now, the current failure goes first. "Nothing new since 05:00,

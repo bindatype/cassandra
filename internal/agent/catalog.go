@@ -11,6 +11,8 @@ const (
 	operationHostUptime           = "host.uptime"
 	operationHostDiskFree         = "host.diskfree"
 	operationHostNetwork          = "host.network"
+	operationHostListeners        = "host.listeners"
+	operationKernelMessages       = "kernel.messages"
 )
 
 var operationCatalog = []OperationCapability{
@@ -24,6 +26,8 @@ var operationCatalog = []OperationCapability{
 	{Name: operationHostUptime, Description: "Report load average and uptime as uptime(1) states them."},
 	{Name: operationHostDiskFree, Description: "Report filesystem capacity and inode use together, because either can exhaust alone."},
 	{Name: operationHostNetwork, Description: "Report interface addresses and the routing table together."},
+	{Name: operationHostListeners, Description: "List listening TCP and UDP sockets. Carries no process attribution."},
+	{Name: operationKernelMessages, Description: "Report kernel ring buffer entries at error and warning level."},
 }
 
 var knownOperations = func() map[string]struct{} {
@@ -45,6 +49,7 @@ func defaultEnabledOperations() []string {
 		operationHostUptime,
 		operationHostDiskFree,
 		operationHostNetwork,
+		operationHostListeners,
 	}
 }
 

@@ -139,6 +139,12 @@ Evidence may also carry a `warnings` list. A warning names a check that did not
 run, and it is a defect in the answer, not a footnote to it. State it in your
 first sentence, before any count.
 
+Evidence from a command-backed operation may carry a `notes` list. A note names
+a limit that is invisible in the output itself -- `host.listeners` reports no
+process attribution, so a port with no owner shown is a port whose owner was not
+looked up, not a port without one. Repeat such a limit in the answer when it
+bears on what was asked; do not present the output as if the limit were absent.
+
 ## Writing the answer
 
 <!-- rule:lead-with-broken -->
