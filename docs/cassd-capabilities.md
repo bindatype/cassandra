@@ -43,9 +43,9 @@ unit's sandbox forbids what it needs.
 | `host.info` | yes | yes | yes | — |
 | `host.uptime` | yes | yes | default on | — |
 | `host.diskfree` | yes | yes | default on | — |
-| `host.network` | yes | yes | default on | — |
+| `host.network` | yes | yes | default on | — (native netlink, no exec) |
 | `host.listeners` | yes | yes | default on | — |
-| `kernel.messages` | yes | yes | **no** | `ProtectKernelLogs=no` |
+| `kernel.messages` | yes | yes | **no** | `ProtectKernelLogs=no` **and** an SELinux policy module |
 | `filesystem.list` | yes | yes | yes | — |
 | `filesystem.stat` | yes | yes | yes | — |
 | `filesystem.tail` | yes | yes | yes | — |
@@ -63,9 +63,29 @@ is refused by name rather than sent and failed. The policy can therefore
 describe the intended end state while the hosts catch up, and the gap reports
 itself.
 
-To make it usable on a host: `ProtectKernelLogs=no` at line 80 of
-`/etc/systemd/system/cassd.service`, `systemctl daemon-reload`, and
-`kernel.messages` appended to `CASS_ENABLED_OPERATIONS`. `deploy/cassd.service`
+**`kernel.messages` does not work on an enforcing host, and one grant is not
+enough.** `ProtectKernelLogs=no` was applied on sgtstubby and winston on
+2026-09-18 and the operation still failed. Measured cause:
+
+```
+avc: denied { nnp_transition } for comm="(dmesg)"
+     scontext=init_t tcontext=dmesg_t tclass=process2 permissive=0
+```
+
+`/usr/bin/dmesg` is labelled `dmesg_exec_t`, so executing it triggers an SELinux
+domain transition to `dmesg_t`. `DynamicUser=yes` implies
+`NoNewPrivileges=yes`, and NNP forbids a transition that is not bounded, so the
+exec is denied and the unit exits 203 before `dmesg` runs. It works only with
+SELinux permissive, which is not a deployment state.
+
+Making it work needs an SELinux policy module permitting that transition, or a
+native reader for `/dev/kmsg` plus a bind mount of that node into the private
+`/dev` -- both larger than the operation is worth. It stays implemented and
+disabled, with the reason recorded here rather than rediscovered.
+
+The other half is still required if it is ever revisited: `ProtectKernelLogs=no`
+at line 80 of `/etc/systemd/system/cassd.service`, `systemctl daemon-reload`,
+and `kernel.messages` appended to `CASS_ENABLED_OPERATIONS`. `deploy/cassd.service`
 in this repository is the source of truth for that unit and must be changed
 with it or the two drift. Note also that `kernel.dmesg_restrict` may be `1` on
 other hosts, where `dmesg` returns nothing regardless of the unit -- the

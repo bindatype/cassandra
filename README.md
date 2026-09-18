@@ -40,6 +40,13 @@ is emptied rather than inherited, and output is capped at the agent.
 exhaust either alone, and `host.network` runs both `ip addr show` and
 `ip route show`.
 
+`host.network` runs no program at all: it reads interfaces and addresses from
+netlink through the Go standard library and the routing tables from
+`/proc/net`. It used to run `ip`, which is labelled `ifconfig_exec_t`; executing
+it triggers an SELinux domain transition that `NoNewPrivileges` forbids, so the
+unit exits 203 under enforcing. Any binary in the command table must be `bin_t`
+for that reason, and a test enforces it.
+
 `host.listeners` runs `ss -tuln` and deliberately omits `-p`: attribution is
 reported only for the calling user's own sockets, so `-p` would yield a blank
 process column on a list that otherwise looks complete. `kernel.messages` runs

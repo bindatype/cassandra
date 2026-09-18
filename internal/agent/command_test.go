@@ -167,18 +167,39 @@ func TestDiskFreeAsksForSpaceAndInodesBoth(t *testing.T) {
 	}
 }
 
-func TestNetworkAsksForAddressesAndRoutesBoth(t *testing.T) {
-	var addr, route bool
-	for _, step := range commandOperations[operationHostNetwork] {
-		if len(step.Args) > 0 && step.Args[0] == "addr" {
-			addr = true
-		}
-		if len(step.Args) > 0 && step.Args[0] == "route" {
-			route = true
-		}
+// A binary run here must be labelled bin_t. Anything else carries an SELinux
+// domain transition, and DynamicUser=yes implies NoNewPrivileges=yes, which
+// forbids an unbounded transition: the exec is denied and the unit exits 203
+// before the program runs.
+//
+// host.network shipped running /usr/sbin/ip (ifconfig_exec_t) and was broken
+// under enforcing from the moment it landed, because it was only ever tested
+// with the agent run as an ordinary user. This is the guard that would have
+// caught it.
+func TestNoDefaultEnabledOperationExecsATransitioningBinary(t *testing.T) {
+	// Measured with ls -Z on sgtstubby, 2026-09-18.
+	transitions := map[string]string{
+		"/usr/sbin/ip":   "ifconfig_exec_t",
+		"/usr/bin/dmesg": "dmesg_exec_t",
+		"/bin/ip":        "ifconfig_exec_t",
+		"/bin/dmesg":     "dmesg_exec_t",
 	}
-	if !addr || !route {
-		t.Errorf("host.network asks addr=%v route=%v; an address without its route explains nothing", addr, route)
+	enabled := map[string]bool{}
+	for _, name := range defaultEnabledOperations() {
+		enabled[name] = true
+	}
+	for operation, steps := range commandOperations {
+		if !enabled[operation] {
+			continue
+		}
+		for _, step := range steps {
+			if label, transitions := transitions[step.Path]; transitions {
+				t.Errorf("%s is enabled by default and execs %s, which is labelled %s. "+
+					"Executing it triggers an SELinux domain transition that "+
+					"NoNewPrivileges forbids, so the unit exits 203 under enforcing",
+					operation, step.Path, label)
+			}
+		}
 	}
 }
 

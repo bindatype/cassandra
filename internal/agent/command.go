@@ -25,6 +25,17 @@ import (
 //   - Output is capped at the agent. A command that floods is cut here, not at
 //     the reader.
 //
+// A binary here must be labelled bin_t. Anything else carries an SELinux domain
+// transition, and DynamicUser=yes implies NoNewPrivileges=yes, which forbids a
+// transition that is not bounded -- the exec is denied and the service exits
+// 203 before the program runs. /usr/sbin/ip (ifconfig_exec_t) and /usr/bin/dmesg
+// (dmesg_exec_t) both do this; uptime, df and ss are bin_t and do not.
+//
+// host.network was shipped running `ip` and was broken under enforcing from the
+// moment it landed. It passed because it was tested with the agent run as an
+// ordinary user rather than as a hardened unit, which is the one difference
+// that decided it. It is now native netlink; see network.go.
+//
 // Deliberately absent: journalctl, dmesg, ps and ss. Each returns empty or
 // partial output under cassd's current sandbox -- ProtectKernelLogs blocks the
 // ring buffer, ProtectProc=invisible hides other processes, and an empty
@@ -71,10 +82,6 @@ var commandOperations = map[string][]commandStep{
 	operationHostDiskFree: {
 		{Label: "space", Path: "/usr/bin/df", Args: []string{"-h"}},
 		{Label: "inodes", Path: "/usr/bin/df", Args: []string{"-i"}},
-	},
-	operationHostNetwork: {
-		{Label: "addresses", Path: "/usr/sbin/ip", Args: []string{"addr", "show"}},
-		{Label: "routes", Path: "/usr/sbin/ip", Args: []string{"route", "show"}},
 	},
 	// -p is deliberately absent. It attributes sockets to processes, but only
 	// for the calling user's own, and this agent owns almost none -- so -p
