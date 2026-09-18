@@ -397,6 +397,19 @@ func (s *Service) processList() (any, bool, *APIError) {
 		records = append(records, record)
 	}
 
+	// Measured on sgtstubby 2026-09-18: the deployed unit sets
+	// ProtectProc=invisible, which mounts /proc with hidepid=invisible, and
+	// the agent runs as a DynamicUser that owns almost nothing. The list that
+	// comes back is then the agent's own two or three processes -- correctly
+	// formed, plausibly short, and describing nothing about the machine.
+	//
+	// Refusing is the only honest answer. A caller cannot tell a quiet host
+	// from a blindfolded agent, and this operation exists to answer questions
+	// about the host.
+	if restricted, reason := procVisibilityRestricted(s.cfg.ProcRoot, records); restricted {
+		return nil, false, newAPIError(503, "process_view_restricted", reason)
+	}
+
 	sort.Slice(records, func(i, j int) bool { return records[i].PID < records[j].PID })
 	truncated := len(records) > s.cfg.MaxProcessEntries
 	if truncated {
@@ -563,3 +576,31 @@ var selfHostname = sync.OnceValue(func() string {
 	}
 	return name
 })
+
+// procVisibilityRestricted reports whether this agent is seeing only its own
+// processes rather than the host's.
+//
+// PID 1 is the test. It always exists, it is always root's, and under
+// hidepid=invisible a process belonging to another user is not merely
+// unreadable but absent from the directory listing. So a scan that produced
+// records and yet never saw PID 1 was looking at a filtered view.
+//
+// A scan that found nothing at all is a different failure and is reported as
+// one, rather than being folded in here.
+func procVisibilityRestricted(procRoot string, records []processRecord) (bool, string) {
+	if len(records) == 0 {
+		return true, "no processes were visible at all, which is not a state a running host can be in; " +
+			"the proc root is unreadable or empty"
+	}
+	for _, record := range records {
+		if record.PID == 1 {
+			return false, ""
+		}
+	}
+	return true, fmt.Sprintf(
+		"PID 1 is not visible, so this agent is seeing only its own %d process(es), not the host's. "+
+			"The unit sets ProtectProc=invisible (hidepid), which hides processes belonging to other "+
+			"users. Reporting this list would describe the agent, not the machine. Dropping "+
+			"ProtectProc=invisible is a deliberate privilege grant: it also exposes every process's "+
+			"full command line", len(records))
+}

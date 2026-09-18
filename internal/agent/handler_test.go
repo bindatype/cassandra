@@ -314,6 +314,17 @@ func newTestHandlerWithRecorder(
 	if err := os.MkdirAll(filepath.Join(procRoot, "100"), 0o755); err != nil {
 		t.Fatalf("mkdir proc pid: %v", err)
 	}
+	// A real /proc always has PID 1, and process.list refuses a view that
+	// lacks it -- that absence is how a hidepid-restricted agent looking only
+	// at its own processes gives itself away. A fixture without it would be
+	// testing a state no host is ever in.
+	if err := os.MkdirAll(filepath.Join(procRoot, "1"), 0o755); err != nil {
+		t.Fatalf("mkdir proc pid 1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(procRoot, "1", "status"),
+		[]byte("Name:\tsystemd\nState:\tS (sleeping)\nPPid:\t0\n"), 0o644); err != nil {
+		t.Fatalf("write proc 1 status: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(workspace, "sample.txt"), []byte("hello world"), 0o644); err != nil {
 		t.Fatalf("write sample: %v", err)
 	}
