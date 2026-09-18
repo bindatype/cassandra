@@ -29,13 +29,21 @@ const (
 	managerAgentID = "000"
 	// fleetItemCap bounds how many agent records travel back to the model. The
 	// summary already carries exact counts for the whole fleet, so the items
-	// exist to be named, not to be tallied, and 275 full records overran the
-	// orchestrator's 64 KB evidence budget once group membership was added --
-	// which the orchestrator answers by discarding the result whole.
+	// exist to be named, not to be tallied.
+	//
+	// 200 is chosen against the orchestrator's evidence tripwire, which rejects
+	// an oversized result *whole* rather than trimming it: a normalized record
+	// with an IPv6 address and two group memberships measures ~219 bytes, so
+	// 200 records is ~44 KB against a 64 KB tripwire, leaving room for a second
+	// source in the same turn. 300 would be ~66 KB -- over, and the answer
+	// would arrive with no fleet evidence at all rather than partial evidence.
+	//
+	// Counting questions should not come here in the first place: groups.list
+	// returns Wazuh's own per-group totals in ten rows. See IntentFleetGroups.
 	//
 	// Items are ordered before the cap applies, so what survives is what a
 	// reader would ask about first.
-	fleetItemCap = 60
+	fleetItemCap = 200
 )
 
 // wazuhActions is the fixed action table. Route plans may only name an action
@@ -43,6 +51,7 @@ const (
 var wazuhActions = map[string]struct{}{
 	"agents.list":   {},
 	"agents.status": {},
+	"groups.list":   {},
 }
 
 // WazuhConfig carries operator-supplied execution details. None are derived
@@ -156,6 +165,10 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 		return Evidence{}, newConnectorError("unsupported_action", fmt.Sprintf("action %q is not executable", step.Action))
 	}
 
+	if step.Action == "groups.list" {
+		return c.executeGroups(ctx, step)
+	}
+
 	query := url.Values{}
 	query.Set("select", wazuhAgentFields)
 
@@ -212,6 +225,99 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 		Summary:        summarizeAgents(payload.Data.AffectedItems, c.criticalGroups),
 		Items:          items,
 	}, nil
+}
+
+// executeGroups answers a group-census question from Wazuh's own per-group
+// totals instead of returning agent records for the model to tally. Ten rows
+// replace two hundred and seventy-six, and the counts are computed by the
+// source rather than by a reader counting a page that may be capped.
+func (c *WazuhConnector) executeGroups(ctx context.Context, step broker.RouteStep) (Evidence, error) {
+	if step.Since != "" || step.Until != "" {
+		// Group membership is current state. A time bound here would filter
+		// nothing and imply a window the answer does not have.
+		return Evidence{}, newConnectorError("unsupported_bound",
+			"groups.list reports current group membership and takes no since or until")
+	}
+
+	query := url.Values{}
+	query.Set("limit", strconv.Itoa(wazuhMaxLimit))
+
+	requestedAt := time.Now().UTC()
+	payload, err := c.getGroups(ctx, query)
+	if err != nil {
+		return Evidence{}, err
+	}
+
+	items := normalizeGroups(payload.Data.AffectedItems)
+	return Evidence{
+		Source:         string(broker.SourceWazuhAPI),
+		Action:         step.Action,
+		Endpoint:       redactEndpoint(c.endpoint),
+		RequestedAt:    requestedAt,
+		DurationMS:     time.Since(requestedAt).Milliseconds(),
+		ItemCount:      len(items),
+		TotalAvailable: payload.Data.TotalAffectedItems,
+		Truncated:      payload.Data.TotalAffectedItems > len(items),
+		Summary:        summarizeGroups(payload.Data.AffectedItems),
+		Items:          items,
+	}, nil
+}
+
+// wazuhGroup mirrors only the fields we consume from GET /groups. Count is
+// Wazuh's own tally for the group and is reported as given: whether it counts
+// the manager's own record is Wazuh's convention, not ours to reinterpret.
+type wazuhGroup struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type wazuhGroupEnvelope struct {
+	Data struct {
+		AffectedItems      []wazuhGroup `json:"affected_items"`
+		TotalAffectedItems int          `json:"total_affected_items"`
+	} `json:"data"`
+	Message string `json:"message"`
+	Error   int    `json:"error"`
+}
+
+// normalizeGroups turns each group into one item carrying its own count, so
+// the answer never depends on the model adding numbers up.
+func normalizeGroups(groups []wazuhGroup) []EvidenceItem {
+	items := make([]EvidenceItem, 0, len(groups))
+	for _, group := range groups {
+		items = append(items, EvidenceItem{
+			ID:          group.Name,
+			Description: fmt.Sprintf("Wazuh agent group %q", group.Name),
+			Fields: map[string]string{
+				"group":  group.Name,
+				"agents": strconv.Itoa(group.Count),
+			},
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left, _ := strconv.Atoi(items[i].Fields["agents"])
+		right, _ := strconv.Atoi(items[j].Fields["agents"])
+		if left != right {
+			return left > right
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items
+}
+
+// summarizeGroups reports totals over every group, not the page returned.
+// agents_total sums group membership, which exceeds the fleet size whenever an
+// agent belongs to more than one group -- the common case, since "default"
+// overlaps the others. It is named as a membership total for that reason.
+func summarizeGroups(groups []wazuhGroup) map[string]int {
+	summary := map[string]int{
+		"groups_total":            len(groups),
+		"group_memberships_total": 0,
+	}
+	for _, group := range groups {
+		summary["group_memberships_total"] += group.Count
+	}
+	return summary
 }
 
 // wazuhAgent mirrors only the fields we consume.
@@ -287,43 +393,77 @@ func (c *WazuhConnector) authenticate(ctx context.Context) (string, error) {
 }
 
 func (c *WazuhConnector) get(ctx context.Context, path string, query url.Values) (wazuhEnvelope, error) {
-	token, err := c.authenticate(ctx)
+	body, err := c.getRaw(ctx, path, query)
 	if err != nil {
 		return wazuhEnvelope{}, err
+	}
+	var envelope wazuhEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return wazuhEnvelope{}, newConnectorError("decode_response", err.Error())
+	}
+	return envelope, nil
+}
+
+// getGroups is get for the /groups endpoint, whose affected_items carry a
+// different shape. It shares getRaw so authentication, the response size bound
+// and Wazuh's own error envelope are enforced identically on both paths.
+func (c *WazuhConnector) getGroups(ctx context.Context, query url.Values) (wazuhGroupEnvelope, error) {
+	body, err := c.getRaw(ctx, "/groups", query)
+	if err != nil {
+		return wazuhGroupEnvelope{}, err
+	}
+	var envelope wazuhGroupEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return wazuhGroupEnvelope{}, newConnectorError("decode_response", err.Error())
+	}
+	return envelope, nil
+}
+
+// getRaw performs the request and returns a body that has passed the size
+// bound and carries no Wazuh-level error. Decoding is the caller's.
+func (c *WazuhConnector) getRaw(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	token, err := c.authenticate(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+path+"?"+query.Encode(), nil)
 	if err != nil {
-		return wazuhEnvelope{}, newConnectorError("build_request", err.Error())
+		return nil, newConnectorError("build_request", err.Error())
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 
 	response, err := c.client.Do(request)
 	if err != nil {
-		return wazuhEnvelope{}, newConnectorError("transport", err.Error())
+		return nil, newConnectorError("transport", err.Error())
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return wazuhEnvelope{}, newConnectorError("http_status", "wazuh returned HTTP "+strconv.Itoa(response.StatusCode))
+		return nil, newConnectorError("http_status", "wazuh returned HTTP "+strconv.Itoa(response.StatusCode))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(response.Body, c.maxResponseBytes+1))
 	if err != nil {
-		return wazuhEnvelope{}, newConnectorError("read_response", err.Error())
+		return nil, newConnectorError("read_response", err.Error())
 	}
 	if int64(len(body)) > c.maxResponseBytes {
-		return wazuhEnvelope{}, newConnectorError("response_too_large", fmt.Sprintf("response exceeded %d bytes", c.maxResponseBytes))
+		return nil, newConnectorError("response_too_large", fmt.Sprintf("response exceeded %d bytes", c.maxResponseBytes))
 	}
 
-	var envelope wazuhEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return wazuhEnvelope{}, newConnectorError("decode_response", err.Error())
+	// Wazuh reports application errors inside a 200 body, so this check belongs
+	// on every path and not only the one that decodes agents.
+	var status struct {
+		Message string `json:"message"`
+		Error   int    `json:"error"`
 	}
-	if envelope.Error != 0 {
-		return wazuhEnvelope{}, newConnectorError("wazuh_error", fmt.Sprintf("wazuh error %d: %s", envelope.Error, envelope.Message))
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, newConnectorError("decode_response", err.Error())
 	}
-	return envelope, nil
+	if status.Error != 0 {
+		return nil, newConnectorError("wazuh_error", fmt.Sprintf("wazuh error %d: %s", status.Error, status.Message))
+	}
+	return body, nil
 }
 
 func normalizeAgents(agents []wazuhAgent, critical map[string]struct{}) []EvidenceItem {

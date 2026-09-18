@@ -4,6 +4,7 @@ type Intent string
 
 const (
 	IntentFleetInventory     Intent = "fleet.inventory"
+	IntentFleetGroups        Intent = "fleet.groups"
 	IntentAgentStatus        Intent = "agent.status"
 	IntentMonitoringProblems Intent = "monitoring.problems"
 	IntentLiveEvidence       Intent = "live.evidence"
@@ -28,7 +29,7 @@ const (
 // so a model is never offered an intent whose connector does not exist.
 func SourceForIntent(intent Intent) (Source, bool) {
 	switch intent {
-	case IntentFleetInventory, IntentAgentStatus:
+	case IntentFleetInventory, IntentFleetGroups, IntentAgentStatus:
 		return SourceWazuhAPI, true
 	case IntentMonitoringProblems:
 		return SourceZabbixAPI, true
@@ -49,6 +50,7 @@ func SourceForIntent(intent Intent) (Source, bool) {
 func AllIntents() []Intent {
 	return []Intent{
 		IntentFleetInventory,
+		IntentFleetGroups,
 		IntentAgentStatus,
 		IntentMonitoringProblems,
 		IntentLiveEvidence,

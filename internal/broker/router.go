@@ -111,6 +111,22 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Limit:  fleetInventoryLimit,
 		}), nil
 
+	case IntentFleetGroups:
+		if request.Host != "" || request.Resource != "" {
+			return RoutePlan{}, newRouteError("invalid_request", "fleet.groups does not accept host or resource")
+		}
+		if request.Since != "" || request.Until != "" {
+			// Group membership is current state, exactly as connection state
+			// is. A bound would filter nothing here and imply a window the
+			// answer does not have.
+			return RoutePlan{}, newRouteError("invalid_request",
+				"fleet.groups reports current group membership and takes no since or until")
+		}
+		return newPlan(request.Intent, RouteStep{
+			Source: SourceWazuhAPI,
+			Action: "groups.list",
+		}), nil
+
 	case IntentAgentStatus:
 		if err := requireHostOnly(request); err != nil {
 			return RoutePlan{}, err
@@ -363,7 +379,7 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 	host := plan.Steps[0].Host
 
 	switch plan.Intent {
-	case IntentFleetInventory:
+	case IntentFleetInventory, IntentFleetGroups:
 		return []RouteRequest{{Intent: plan.Intent}}
 
 	case IntentAgentStatus:
