@@ -32,6 +32,21 @@ type AuditEvent struct {
 
 	Calls []AuditCall `json:"calls,omitempty"`
 
+	// Trace is every decision the loop made, in order.
+	//
+	// It was kept in memory and discarded, which left the audit unable to
+	// answer questions it looked like it should. A model that sent the same
+	// failing request three times records three attempt_failed calls; whether
+	// the repeat guidance fired is a trace step, so the only way to find out
+	// was to run the question again and hope it failed the same way. That is
+	// the argument that put attempt_failed here in the first place, and it
+	// applies unchanged to the steps that explain it.
+	//
+	// The steps that matter most are the ones describing something that did
+	// NOT happen -- evidence withheld, a result discarded, a repeat refused --
+	// and those leave no other mark anywhere.
+	Trace []TraceEntry `json:"trace,omitempty"`
+
 	// Answer is what was actually said, which is the claim the rest of this
 	// record exists to check.
 	//

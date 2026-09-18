@@ -124,7 +124,8 @@ func validateHostSelector(host string) error {
 // know, and three copies of a list is how they come to disagree.
 func OperationTakesTarget(operation string) bool {
 	switch operation {
-	case "host.info", "host.uptime", "host.diskfree", "host.network":
+	case "host.info", "host.uptime", "host.diskfree", "host.network",
+		"capabilities.describe":
 		// These report facts about the machine rather than about a file. The
 		// command-backed ones take no target for a second reason as well: every
 		// argument they pass is a compile-time constant, so there is no place

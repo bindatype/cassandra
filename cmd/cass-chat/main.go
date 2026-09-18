@@ -136,6 +136,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
+	// Ask the endpoint agents what they implement before offering their
+	// resources to the model. A policy can advertise a capability a host does
+	// not have -- an agent upgraded on one host and not another does exactly
+	// that -- and without this the model discovers it by failing.
+	session.ReconcileAgents(ctx)
+
 	answer, askErr := session.Ask(ctx, question)
 	if *showTrace {
 		for _, entry := range session.Trace() {

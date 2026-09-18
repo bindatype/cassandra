@@ -222,6 +222,11 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 
 // Session runs one question through the model, the broker, and back.
 type Session struct {
+	// agentOps is what each live host's agent reported it can do, when asked.
+	// A host absent from this map was never probed, which is not the same as a
+	// host that answered and offered nothing.
+	agentOps map[string]agentCapabilities
+
 	client   *MindRouterClient
 	router   *broker.Router
 	executor *connector.Executor
@@ -267,6 +272,19 @@ func NewSession(client *MindRouterClient, router *broker.Router, executor *conne
 		}
 	}
 	return &Session{client: client, router: router, executor: executor, intents: intents}
+}
+
+// ReconcileAgents asks every live endpoint agent what it actually implements,
+// so a request for something a host cannot do is refused with that host's real
+// capability list rather than sent and left to fail opaquely.
+//
+// It is called explicitly rather than from NewSession because it costs a round
+// trip per live host, and a caller that only plans, or only asks a question no
+// endpoint can answer, should not pay for it. Skipping it is safe: every check
+// downstream treats "not probed" as "no opinion".
+func (s *Session) ReconcileAgents(ctx context.Context) {
+	hosts, _ := s.router.LiveTargets()
+	s.agentOps = probeAgents(ctx, s.executor, hosts)
 }
 
 // Intents lists what this session can actually offer a model.
@@ -642,6 +660,15 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 	s.event.Decision = "allowed"
 	s.event.Plan = planJSON
 
+	// Policy says this host offers the resource; the agent is what decides
+	// whether it can serve it. Asking here converts an opaque execution
+	// failure, which a model retries verbatim, into a refusal that names what
+	// the host does offer.
+	if err := checkPlanAgainstAgents(plan, s.agentOps); err != nil {
+		s.record("agent_lacks_operation", err.Error(), false)
+		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+
 	result, err := s.executor.Execute(ctx, plan)
 	if err != nil {
 		s.record("execution_failed", err.Error(), false)
@@ -658,6 +685,7 @@ func (s *Session) writeAudit() {
 		return
 	}
 	s.event.DurationMS = time.Since(s.started).Milliseconds()
+	s.event.Trace = s.trace
 	if s.event.AnswerChars == 0 && s.event.Status == "answered" {
 		s.event.Status = "failed"
 		for _, entry := range s.trace {
