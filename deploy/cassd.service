@@ -77,7 +77,28 @@ ProtectClock=yes
 ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectKernelLogs=yes
+# Deliberately NOT yes, which is what the hardening default would be.
+#
+# ProtectKernelLogs=yes removes CAP_SYSLOG and blocks the kernel ring buffer,
+# which is precisely what kernel.messages reads. That operation reports OOM
+# kills, hardware errors, filesystem corruption and link flaps -- none of which
+# any other source here can see, because they never reach a file cassd is
+# allowed to read.
+#
+# The grant is narrow and the exposure is modest: kernel messages, at error and
+# warning level, from a buffer that has already wrapped past anything old. It
+# does not open the journal, it does not expose command lines, and it is not a
+# step toward either.
+#
+# Note kernel.dmesg_restrict is a separate gate the unit cannot override. Where
+# it is 1, dmesg returns nothing however this line is set, and the operation
+# reports the refusal with its stderr rather than an empty success.
+#
+# Set on sgtstubby and winston 2026-09-18. Changed here so the repository and
+# the deployed units do not disagree -- a deployed file that has quietly drifted
+# from its source is how winston came to carry Ansible markers for a machine
+# Ansible does not manage.
+ProtectKernelLogs=no
 ProtectControlGroups=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes
