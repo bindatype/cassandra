@@ -16,7 +16,8 @@
         "host-uptime",
         "host-diskfree",
         "host-network",
-        "host-listeners"
+        "host-listeners",
+        "kernel-messages"
       ]
     },
     "winston.arc.gwu.edu": {
@@ -28,7 +29,8 @@
         "host-uptime",
         "host-diskfree",
         "host-network",
-        "host-listeners"
+        "host-listeners",
+        "kernel-messages"
       ]
     }
   },
@@ -79,6 +81,9 @@
     },
     "host-listeners": {
       "operation": "host.listeners"
+    },
+    "kernel-messages": {
+      "operation": "kernel.messages"
     }
   }
 }

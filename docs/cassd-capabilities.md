@@ -31,25 +31,45 @@ context for that.
 
 ### Operations
 
-Ten are implemented in the agent. Eight are routable through the broker. What
+Twelve are implemented in the agent. Ten are routable through the broker. What
 is enabled in a given deployment is separate again, and set per host. The three
-sets are deliberately different.
+sets are deliberately different, and a fourth distinction now matters: an
+operation can be implemented, routable, enabled, and still unusable because the
+unit's sandbox forbids what it needs.
 
-| Operation | Implemented | Broker-routable | Enabled |
-|---|---|---|---|
-| `capabilities.describe` | yes | n/a | yes |
-| `host.info` | yes | yes | yes |
-| `host.uptime` | yes | yes | default on |
-| `host.diskfree` | yes | yes | default on |
-| `host.network` | yes | yes | default on |
-| `filesystem.list` | yes | yes | yes |
-| `filesystem.stat` | yes | yes | yes |
-| `filesystem.tail` | yes | yes | yes |
-| `filesystem.read` | yes | yes | **no** |
-| `process.list` | yes | **no** | **no** |
+| Operation | Implemented | Broker-routable | Enabled | Needs a grant |
+|---|---|---|---|---|
+| `capabilities.describe` | yes | n/a | yes | — |
+| `host.info` | yes | yes | yes | — |
+| `host.uptime` | yes | yes | default on | — |
+| `host.diskfree` | yes | yes | default on | — |
+| `host.network` | yes | yes | default on | — |
+| `host.listeners` | yes | yes | default on | — |
+| `kernel.messages` | yes | yes | **no** | `ProtectKernelLogs=no` |
+| `filesystem.list` | yes | yes | yes | — |
+| `filesystem.stat` | yes | yes | yes | — |
+| `filesystem.tail` | yes | yes | yes | — |
+| `filesystem.read` | yes | yes | **no** | — |
+| `process.list` | yes | **no** | **no** | drop `ProtectProc=invisible` |
 
-A deployment that pins `CASS_ENABLED_OPERATIONS` explicitly does not pick up
-the three new operations until their names are added to it.
+A deployment that pins `CASS_ENABLED_OPERATIONS` explicitly does not pick up a
+new operation until its name is added to that list.
+
+`kernel.messages` is in the policy while still disabled on every host, which
+would have been reckless before agent reconciliation existed and is now merely
+the honest order. The broker asks each agent what it implements before offering
+anything; an agent without the operation enabled does not list it, so the plan
+is refused by name rather than sent and failed. The policy can therefore
+describe the intended end state while the hosts catch up, and the gap reports
+itself.
+
+To make it usable on a host: `ProtectKernelLogs=no` at line 80 of
+`/etc/systemd/system/cassd.service`, `systemctl daemon-reload`, and
+`kernel.messages` appended to `CASS_ENABLED_OPERATIONS`. `deploy/cassd.service`
+in this repository is the source of truth for that unit and must be changed
+with it or the two drift. Note also that `kernel.dmesg_restrict` may be `1` on
+other hosts, where `dmesg` returns nothing regardless of the unit -- the
+operation reports the refusal and its stderr rather than an empty success.
 
 Implementing an operation, exposing it through the broker, and enabling it on a
 host are three separate decisions. `process.list` is implemented and
