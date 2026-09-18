@@ -1,0 +1,181 @@
+package agent
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"time"
+)
+
+// Running a program is a different security posture from reading a file, so
+// the surface is drawn as narrowly as it can be and still be useful:
+//
+//   - Every argument below is a compile-time constant. Nothing a model sends
+//     reaches a command line, so there is no parameter to validate and no
+//     injection class to defend against. This is the whole reason these
+//     operations take no target.
+//   - No shell. exec.CommandContext with an absolute path means `;`, `&&`,
+//     `|` and backticks are inert bytes, not syntax.
+//   - The environment is emptied rather than inherited, so nothing in cassd's
+//     environment steers a child's behaviour.
+//   - Output is capped at the agent. A command that floods is cut here, not at
+//     the reader.
+//
+// Deliberately absent: journalctl, dmesg, ps and ss. Each returns empty or
+// partial output under cassd's current sandbox -- ProtectKernelLogs blocks the
+// ring buffer, ProtectProc=invisible hides other processes, and an empty
+// SupplementaryGroups excludes systemd-journal. Shipping them would mean
+// exit code 0 with a well-formed answer describing almost nothing, which is
+// worse than not having them. They wait on a deliberate privilege grant.
+const (
+	commandTimeout   = 10 * time.Second
+	commandMaxOutput = 64 * 1024
+)
+
+// commandStep is one program invocation. A single operation may run several,
+// because the alternative is a parameter the model can get wrong: asking only
+// `df -h` misses a filesystem that is out of inodes at 40% capacity, and
+// asking only `ip addr` misses the route that explains why a reachable-looking
+// interface answers nothing.
+type commandStep struct {
+	// Label names the step in the response, so a reader can tell which output
+	// came from which invocation without parsing argv.
+	Label string
+	Path  string
+	Args  []string
+}
+
+var commandOperations = map[string][]commandStep{
+	operationHostUptime: {
+		{Label: "uptime", Path: "/usr/bin/uptime", Args: nil},
+	},
+	operationHostDiskFree: {
+		{Label: "space", Path: "/usr/bin/df", Args: []string{"-h"}},
+		{Label: "inodes", Path: "/usr/bin/df", Args: []string{"-i"}},
+	},
+	operationHostNetwork: {
+		{Label: "addresses", Path: "/usr/sbin/ip", Args: []string{"addr", "show"}},
+		{Label: "routes", Path: "/usr/sbin/ip", Args: []string{"route", "show"}},
+	},
+}
+
+// commandResult is one step's outcome. Every field is reported, including the
+// unhappy ones: a step that failed says so next to the steps that did not,
+// rather than being dropped from a list that then reads as complete.
+type commandResult struct {
+	Label      string `json:"label"`
+	Command    string `json:"command"`
+	ExitCode   int    `json:"exit_code"`
+	Stdout     string `json:"stdout,omitempty"`
+	Stderr     string `json:"stderr,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	Failed     bool   `json:"failed,omitempty"`
+	Failure    string `json:"failure,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+}
+
+// runCommandOperation executes every step of an operation and reports all of
+// them. If no step produced output the whole operation is an error, because an
+// empty success is the failure this project keeps finding: a reader cannot
+// distinguish "the machine has nothing to report" from "cassd could not look".
+func (s *Service) runCommandOperation(ctx context.Context, operation string) (any, bool, *APIError) {
+	steps, known := commandOperations[operation]
+	if !known {
+		return nil, false, newAPIError(400, "unknown_operation", "operation is not supported")
+	}
+
+	// A missing binary is refused before anything runs, and the refusal names
+	// the path. "command not found" buried in a step's stderr would read as
+	// the machine having nothing to say.
+	for _, step := range steps {
+		if _, err := os.Stat(step.Path); err != nil {
+			return nil, false, newAPIError(503, "command_unavailable",
+				"required program is not present at "+step.Path)
+		}
+	}
+
+	results := make([]commandResult, 0, len(steps))
+	anyOutput := false
+	for _, step := range steps {
+		result := s.runCommandStep(ctx, step)
+		if result.Stdout != "" {
+			anyOutput = true
+		}
+		results = append(results, result)
+	}
+
+	if !anyOutput {
+		return nil, false, newAPIError(502, "command_produced_nothing",
+			"every step ran and none produced output; this is reported as a failure rather than "+
+				"an empty result, because an empty result would read as the machine having nothing to report")
+	}
+
+	truncated := false
+	for _, result := range results {
+		if result.Truncated {
+			truncated = true
+		}
+	}
+	return map[string]any{"steps": results}, truncated, nil
+}
+
+func (s *Service) runCommandStep(ctx context.Context, step commandStep) commandResult {
+	started := time.Now()
+	result := commandResult{Label: step.Label, Command: commandLine(step)}
+
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, step.Path, step.Args...)
+	// Empty, not inherited. A child's behaviour must not depend on what was in
+	// cassd's environment.
+	cmd.Env = []string{}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	result.DurationMS = time.Since(started).Milliseconds()
+
+	result.Stdout, result.Truncated = capOutput(stdout.Bytes())
+	stderrText, stderrTruncated := capOutput(stderr.Bytes())
+	result.Stderr = stderrText
+	result.Truncated = result.Truncated || stderrTruncated
+
+	switch {
+	case err == nil:
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		result.Failed = true
+		result.ExitCode = -1
+		result.Failure = "timed out after " + commandTimeout.String()
+	default:
+		result.Failed = true
+		result.ExitCode = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			result.ExitCode = exitErr.ExitCode()
+		}
+		result.Failure = err.Error()
+	}
+	return result
+}
+
+func commandLine(step commandStep) string {
+	line := step.Path
+	for _, arg := range step.Args {
+		line += " " + arg
+	}
+	return line
+}
+
+// capOutput bounds one stream and says whether it was cut. Trimming to a byte
+// count can split a UTF-8 rune, so the cut is reported rather than hidden.
+func capOutput(raw []byte) (string, bool) {
+	if len(raw) <= commandMaxOutput {
+		return string(bytes.TrimRight(raw, "\n")), false
+	}
+	return string(bytes.TrimRight(raw[:commandMaxOutput], "\n")), true
+}

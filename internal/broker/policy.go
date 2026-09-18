@@ -123,7 +123,16 @@ func validateHostSelector(host string) error {
 // deliberate -- validation, route construction and the connector each need to
 // know, and three copies of a list is how they come to disagree.
 func OperationTakesTarget(operation string) bool {
-	return operation != "host.info"
+	switch operation {
+	case "host.info", "host.uptime", "host.diskfree", "host.network":
+		// These report facts about the machine rather than about a file. The
+		// command-backed ones take no target for a second reason as well: every
+		// argument they pass is a compile-time constant, so there is no place
+		// for a caller-supplied value to land.
+		return false
+	default:
+		return true
+	}
 }
 
 func validateResource(resource Resource) error {
@@ -203,4 +212,7 @@ var routableOperations = map[string]bool{
 	"filesystem.read": true,
 	"filesystem.tail": true,
 	"host.info":       true,
+	"host.uptime":     true,
+	"host.diskfree":   true,
+	"host.network":    true,
 }

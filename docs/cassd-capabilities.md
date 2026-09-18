@@ -31,18 +31,25 @@ context for that.
 
 ### Operations
 
-Seven are implemented in the agent. Five are routable through the broker. Five
-are enabled in the deployment. The three sets are deliberately different.
+Ten are implemented in the agent. Eight are routable through the broker. What
+is enabled in a given deployment is separate again, and set per host. The three
+sets are deliberately different.
 
 | Operation | Implemented | Broker-routable | Enabled |
 |---|---|---|---|
 | `capabilities.describe` | yes | n/a | yes |
 | `host.info` | yes | yes | yes |
+| `host.uptime` | yes | yes | default on |
+| `host.diskfree` | yes | yes | default on |
+| `host.network` | yes | yes | default on |
 | `filesystem.list` | yes | yes | yes |
 | `filesystem.stat` | yes | yes | yes |
 | `filesystem.tail` | yes | yes | yes |
 | `filesystem.read` | yes | yes | **no** |
 | `process.list` | yes | **no** | **no** |
+
+A deployment that pins `CASS_ENABLED_OPERATIONS` explicitly does not pick up
+the three new operations until their names are added to it.
 
 Implementing an operation, exposing it through the broker, and enabling it on a
 host are three separate decisions. `process.list` is implemented and
@@ -112,6 +119,22 @@ it is a different security posture, and it should be argued as one.
 
 Every "readable" below was measured on `winston` (Rocky 9.8) as an
 unprivileged user on 2026-09-17, not inferred.
+
+> [!note] Partly superseded, 2026-09-18
+> Tier 1 below proposed reading network facts from `/proc` and `/sys` to avoid
+> executing anything. That boundary has since been crossed deliberately for a
+> bounded set: `host.uptime`, `host.diskfree` and `host.network` run programs.
+> `host.network` runs `ip addr show` and `ip route show`, which answers the
+> gap Tier 1 names below — IPv4 addresses are not in `/sys` and need netlink,
+> which `ip` already speaks.
+>
+> The exec surface is drawn so that no caller input reaches a command line:
+> every argument is a compile-time constant, which is why these operations take
+> no target. `journalctl`, `dmesg`, `ps` and `ss` were requested at the same
+> time and **deliberately not shipped** — each returns empty or partial output
+> under the current unit (`ProtectKernelLogs=yes`, `ProtectProc=invisible`,
+> empty `SupplementaryGroups`), and would do so with exit code 0. Each needs a
+> named privilege grant first; see section 4.
 
 ### Tier 1 — no new boundary
 

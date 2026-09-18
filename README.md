@@ -15,6 +15,9 @@ empirically.
 The compiled operation catalog is deliberately narrow:
 
 - `host.info`
+- `host.uptime`
+- `host.diskfree`
+- `host.network`
 - `filesystem.list`
 - `filesystem.stat`
 - `filesystem.read`
@@ -25,6 +28,15 @@ The compiled operation catalog is deliberately narrow:
 All except `process.list` are enabled by default. Process inspection is
 an explicit opt-in and returns only PID, parent PID, name, and state; it
 never reads or returns command-line arguments.
+
+`host.uptime`, `host.diskfree` and `host.network` run programs. Every
+argument they pass is a compile-time constant, so nothing a caller sends
+reaches a command line and there is no parameter to validate; they take
+no target for that reason. No shell is involved, the child environment
+is emptied rather than inherited, and output is capped at the agent.
+`host.diskfree` runs both `df -h` and `df -i` because a filesystem can
+exhaust either alone, and `host.network` runs both `ip addr show` and
+`ip route show`.
 
 Core constraints:
 

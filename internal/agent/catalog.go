@@ -8,6 +8,9 @@ const (
 	operationFilesystemRead       = "filesystem.read"
 	operationFilesystemTail       = "filesystem.tail"
 	operationProcessList          = "process.list"
+	operationHostUptime           = "host.uptime"
+	operationHostDiskFree         = "host.diskfree"
+	operationHostNetwork          = "host.network"
 )
 
 var operationCatalog = []OperationCapability{
@@ -18,6 +21,9 @@ var operationCatalog = []OperationCapability{
 	{Name: operationFilesystemRead, Description: "Read a bounded byte range from an allowlisted file.", TargetKinds: []string{"file"}},
 	{Name: operationFilesystemTail, Description: "Return the trailing bytes from an allowlisted file.", TargetKinds: []string{"file"}},
 	{Name: operationProcessList, Description: "List bounded process metadata without command-line arguments."},
+	{Name: operationHostUptime, Description: "Report load average and uptime as uptime(1) states them."},
+	{Name: operationHostDiskFree, Description: "Report filesystem capacity and inode use together, because either can exhaust alone."},
+	{Name: operationHostNetwork, Description: "Report interface addresses and the routing table together."},
 }
 
 var knownOperations = func() map[string]struct{} {
@@ -36,6 +42,9 @@ func defaultEnabledOperations() []string {
 		operationFilesystemStat,
 		operationFilesystemRead,
 		operationFilesystemTail,
+		operationHostUptime,
+		operationHostDiskFree,
+		operationHostNetwork,
 	}
 }
 
