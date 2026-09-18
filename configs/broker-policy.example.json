@@ -12,7 +12,10 @@
         "log-dir",
         "log-dir-metadata",
         "patch-history",
-        "host-facts"
+        "host-facts",
+        "host-uptime",
+        "host-diskfree",
+        "host-network"
       ]
     },
     "winston.arc.gwu.edu": {
@@ -20,7 +23,10 @@
         "log-dir",
         "log-dir-metadata",
         "patch-history",
-        "host-facts"
+        "host-facts",
+        "host-uptime",
+        "host-diskfree",
+        "host-network"
       ]
     }
   },
@@ -59,6 +65,15 @@
     },
     "host-facts": {
       "operation": "host.info"
+    },
+    "host-uptime": {
+      "operation": "host.uptime"
+    },
+    "host-diskfree": {
+      "operation": "host.diskfree"
+    },
+    "host-network": {
+      "operation": "host.network"
     }
   }
 }

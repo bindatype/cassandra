@@ -197,6 +197,14 @@ func validateResource(resource Resource) error {
 		if params != (OperationParams{}) {
 			return fmt.Errorf("host.info does not accept parameters")
 		}
+	case "host.uptime", "host.diskfree", "host.network":
+		// Command-backed operations take no parameters at all: every argument
+		// they pass is compiled in, which is the property that removes the
+		// injection class. A policy that tried to bound them would be
+		// describing a knob that does not exist.
+		if params != (OperationParams{}) {
+			return fmt.Errorf("%s does not accept parameters", resource.Operation)
+		}
 	default:
 		return fmt.Errorf("operation %q is not broker-routable", resource.Operation)
 	}
