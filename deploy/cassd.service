@@ -110,7 +110,30 @@ UMask=0077
 # The broker runs on this host, so nothing off-box should ever reach it. The
 # bind address is loopback as well; this is the second lock on the same door,
 # and it is the one a misconfigured CASS_BIND_ADDR cannot undo.
-RestrictAddressFamilies=AF_INET AF_INET6
+# AF_NETLINK is here for host.network, which reads interfaces and addresses
+# from the kernel over a netlink socket -- net.Interfaces() in the Go standard
+# library, no child process. Without it the call fails with
+# "netlinkrib: address family not supported".
+#
+# This was the blocker all along and it was found last. host.network first
+# shipped running `ip`, which failed the same way for the same reason: ip also
+# speaks netlink, so restricting the family broke it whether the work was done
+# in-process or in a child. A separate SELinux problem -- /usr/sbin/ip is
+# ifconfig_exec_t and NoNewPrivileges forbids the domain transition -- sat
+# behind it and would have bitten as soon as enforcing came back. Two walls,
+# and removing the second one first changed nothing.
+#
+# Measured on sgtstubby 2026-09-18: with AF_INET AF_INET6 the operation fails;
+# adding AF_NETLINK returns 5 interfaces and 20 routes.
+#
+# The broadening is real but narrow in practice: an unprivileged process can
+# read routing and link state over netlink, which is precisely what this
+# operation reports and what any user on the host can already run `ip` to see.
+#
+# Note host.listeners is unaffected -- ss falls back to parsing /proc/net when
+# it cannot open a netlink socket, which is why it worked while host.network
+# did not.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK
 IPAddressAllow=localhost
 IPAddressDeny=any
 
