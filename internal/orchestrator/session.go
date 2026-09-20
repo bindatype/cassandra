@@ -432,6 +432,31 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			} else {
 				s.record("answer_synthesized", "", true)
 			}
+			// No intent was used and none failed: the model looked at what it
+			// could reach and judged that none of it applied. That is the only
+			// case where the documentation is consulted, and it is exactly
+			// where the answer would otherwise be "the available evidence
+			// source does not cover that question".
+			//
+			// The two exclusions are the whole safety of this. succeeded > 0
+			// means a measurement exists and prose must not displace it.
+			// failed > 0 means an evidence call broke, and answering from
+			// documentation would hide the breakage behind a fluent paragraph.
+			if succeeded == 0 && failed == 0 {
+				if fromDocs, docErr := s.answerFromDocs(ctx, question); docErr == nil {
+					s.record("answered_from_documentation",
+						"no evidence source applied; answered from the embedded documentation", true)
+					s.event.Decision = "documentation"
+					s.event.Answer = fromDocs
+					s.event.AnswerChars = len(fromDocs)
+					return fromDocs, nil
+				} else {
+					// The model's own answer stands. A failed lookup must not
+					// cost the user the answer they would have had.
+					s.record("documentation_lookup_failed", docErr.Error(), false)
+				}
+			}
+
 			// A result was withheld to keep the request inside the context.
 			// The model was told to say so; if it did not, the answer says it
 			// anyway. This is a fact about what was gathered, not a claim

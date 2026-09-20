@@ -124,3 +124,38 @@ func TestUnofferedIntentIsRefusedBeforeTheExecutor(t *testing.T) {
 		t.Errorf("the caller still sees an executor fault rather than a configuration problem: %v", err)
 	}
 }
+
+// The documentation fallback must be unreachable when evidence was gathered.
+// Prose describing what the tool can do must never stand where a measurement
+// was actually taken.
+func TestDocumentationNeverDisplacesEvidence(t *testing.T) {
+	// The model calls the tool once, gets evidence, then answers.
+	var turn int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn++
+		if turn == 1 {
+			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[
+				{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"fleet.inventory\"}"}}
+			]}}]}`)
+			return
+		}
+		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Two agents are disconnected. Scope: fleet.inventory."}}]}`)
+	}))
+	defer server.Close()
+
+	fake := &fakeConnector{source: broker.SourceWazuhAPI}
+	session := newTestSession(t, server.URL, fake)
+
+	answer, err := session.Ask(context.Background(), "how many agents are disconnected?")
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if strings.Contains(answer, "Cassandra documentation") {
+		t.Error("an answer backed by evidence was replaced with documentation")
+	}
+	for _, entry := range session.Trace() {
+		if entry.Stage == "answered_from_documentation" {
+			t.Error("the documentation path ran even though evidence was collected")
+		}
+	}
+}

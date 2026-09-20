@@ -294,6 +294,7 @@ a swapped operation, or an extra step all fail verification.
 | Intent | Route |
 |---|---|
 | `fleet.inventory` | Wazuh API `agents.list` |
+| `fleet.groups` | Wazuh API `groups.list` |
 | `agent.status` | Wazuh API `agents.status` |
 | `monitoring.problems` | Zabbix API `trigger.get` |
 | `monitoring.history` | Zabbix API `event.get` |
@@ -369,10 +370,11 @@ These intents, and nothing else:
 | Ask about | Intent | Source |
 |---|---|---|
 | agent inventory and connection state | `fleet.inventory` | Wazuh API |
+| which agent groups exist and how big each is | `fleet.groups` | Wazuh API (counts from Wazuh, not tallied from a page) |
 | one agent's state, by exact name | `agent.status` | Wazuh API |
 | active problem triggers, optionally per host | `monitoring.problems` | Zabbix API |
 | what happened during a past window | `monitoring.history` | Zabbix API (event log) |
-| a policy-approved file from an endpoint | `live.evidence` | Cassandra endpoint agent (no agent deployed yet) |
+| a file, host facts, uptime, disk, network or listening ports from an endpoint | `live.evidence` | Cassandra endpoint agent (`cassd`, deployed on sgtstubby and winston) |
 | aggregate/ad hoc HPC accounting questions | `database.query` | PegasusDB (one read-only `SELECT`) |
 | open tickets in allowlisted queues | `tickets.open` | Request Tracker REST 2.0 |
 | open tickets mentioning a host, by subject | `tickets.for_host` | Request Tracker REST 2.0 |

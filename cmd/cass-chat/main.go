@@ -84,6 +84,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	showTrace := flags.Bool("trace", false, "print the policy decision trace to stderr")
 	auditPath := flags.String("audit", env.Get(auditPathEnv), "append a JSON-lines audit record for each question")
 	timeout := flags.Duration("timeout", 180*time.Second, "overall timeout")
+	// Written out rather than left to PrintDefaults, because a list of flags
+	// does not tell someone what the tool is for. The first thing a new user
+	// needs is the shape of a question it can answer.
+	flags.Usage = func() {
+		fmt.Fprint(stderr, usageText)
+		flags.PrintDefaults()
+	}
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -389,3 +396,31 @@ func pegasusTimeout() time.Duration {
 	}
 	return timeout
 }
+
+// usageText is the front of -help. It names what the tool answers from,
+// because "nine evidence channels" means nothing to someone typing askcass for
+// the first time, and it points at the way to ask for more -- the tool can now
+// answer questions about itself from its own documentation.
+const usageText = `askcass -- ask a question about GW RTS infrastructure.
+
+  askcass "how many Wazuh agents are disconnected right now?"
+  askcass "what groups are in Wazuh and how many nodes in each?"
+  askcass "which hosts have Zabbix triggers firing?"
+  askcass "how many jobs failed yesterday on each partition?"
+  askcass "are there open tickets mentioning sgtstubby?"
+  askcass "what is sgtstubby's uptime and load?"
+
+Answers come from live sources -- Wazuh, Zabbix, the pegasusdb accounting
+database, Request Tracker, and policy-approved reads from Cassandra endpoint
+agents. Every answer states which source it used. Nothing is answered from
+memory: if no source covers the question, it says so.
+
+You can also ask about the tool itself, and it will answer from its own
+documentation rather than refusing:
+
+  askcass "how does cassandra work?"
+  askcass "what can I ask you about?"
+  askcass "what is an intent?"
+
+Flags:
+`
