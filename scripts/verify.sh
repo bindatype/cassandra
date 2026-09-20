@@ -168,8 +168,26 @@ fi
 # a realistic URL that can never resolve, and the zoom tests use exactly that.
 # A scanner that cannot tell a fixture from a leak gets switched off.
 badsecret=""
+
+# Tracked files AND new ones that are not yet tracked.
+#
+# This scanned `git ls-files` only, so a file created and not yet added was
+# invisible to it. That is exactly backwards: a brand-new file is the one most
+# likely to carry something pasted in while working, and the scan passed on it
+# right up until the moment it was committed -- at which point the next run
+# failed and the bad content was already in history.
+#
+# Found the hard way: a new test listing credential shapes to scan the docs for
+# passed verify while untracked, then failed the run after it was committed.
+scanfiles() {
+	{
+		git ls-files -z 2>/dev/null
+		git ls-files -z --others --exclude-standard 2>/dev/null
+	} | sort -zu
+}
+
 for pattern in 'zoom\.us' 'hooks\.slack\.com' 'incomingwebhook/[A-Za-z0-9_-]\{16,\}'; do
-	hits=$(git ls-files -z 2>/dev/null |
+	hits=$(scanfiles |
 		xargs -0 grep -nE "$pattern" 2>/dev/null |
 		grep -vE '\.invalid|\.example|example\.(com|org|net)|localhost' |
 		grep -v '^scripts/verify.sh:' |
@@ -185,15 +203,15 @@ for var in SROIAAA_ZOOM_WEBHOOK_URL SROIAAA_ZOOM_WEBHOOK_SECRET \
 	# Short values match everywhere and would only produce noise; a real
 	# credential is not eight characters.
 	[ ${#value} -ge 12 ] || continue
-	hits=$(git ls-files -z 2>/dev/null | xargs -0 grep -lF "$value" 2>/dev/null || true)
+	hits=$(scanfiles | xargs -0 grep -lF "$value" 2>/dev/null || true)
 	[ -z "$hits" ] || badsecret="$badsecret
   the value of $var appears in:$(printf ' %s' $hits)"
 done
 
 if [ -z "$badsecret" ]; then
-	ok "no credential or webhook endpoint in tracked files"
+	ok "no credential or webhook endpoint in tracked or new files"
 else
-	bad "a credential or webhook endpoint is in tracked files" "$badsecret"
+	bad "a credential or webhook endpoint is in a tracked or new file" "$badsecret"
 fi
 
 # The rename from SROIAAA to Cassandra leaves two deliberate survivors: the
