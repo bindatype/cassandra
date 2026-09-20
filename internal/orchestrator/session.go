@@ -638,6 +638,26 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: fmt.Errorf("undecodable intent: %w", err), recoverable: true}
 	}
 
+	// The tool description lists only intents this session can reach, but a
+	// list is not a door. A model that names an intent it was never offered --
+	// because it has seen one elsewhere, or inferred it -- gets planned anyway,
+	// and the failure surfaces from the executor as "no connector registered
+	// for source", which reads as an internal fault rather than the
+	// configuration problem it is.
+	//
+	// Observed: a deployment with no CASS_AGENT_CONFIG offers no live.evidence,
+	// the model proposed it regardless, and the user was shown a connector
+	// error they could not act on.
+	if err := s.intentIsOffered(request.Intent); err != nil {
+		s.record("intent_not_offered", err.Error(), false)
+		if s.event.Decision == "no_tool_call" {
+			s.event.Decision = "denied"
+		}
+		// Another attempt helps only if something else is reachable. When this
+		// session can reach nothing, retrying spends turns to rediscover that.
+		return connector.Result{}, &callFailure{err: err, recoverable: len(s.intents) > 0}
+	}
+
 	plan, err := s.router.Plan(request)
 	if err != nil {
 		s.record("policy_denied", err.Error(), false)
@@ -825,4 +845,26 @@ func resourceSchema(liveResources []string) map[string]any {
 			"For live.evidence ONLY. Never put SQL here."
 	}
 	return schema
+}
+
+// intentIsOffered reports whether this session advertised the intent, naming
+// what it did advertise when it did not.
+//
+// This is the enforcing half of the filter in NewSession. That filter decides
+// what the model is told exists; without this, nothing decides what it may
+// actually ask for.
+func (s *Session) intentIsOffered(intent broker.Intent) error {
+	for _, offered := range s.intents {
+		if offered == string(intent) {
+			return nil
+		}
+	}
+	if len(s.intents) == 0 {
+		return fmt.Errorf("this deployment has no evidence sources configured, so no intent can be "+
+			"served, including %q. That is a configuration problem on the host running the broker, "+
+			"not something a different request can work around", intent)
+	}
+	return fmt.Errorf("intent %q was not offered by this deployment and cannot be served. "+
+		"Its source is not configured here. Available: %s",
+		intent, strings.Join(s.intents, ", "))
 }
