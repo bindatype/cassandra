@@ -1,16 +1,44 @@
-# Cassandra Phase One Prototype
+# Cassandra
 
-Secure Read-Only Infrastructure API for AI and Automation, or Cassandra,
-is a Phase One prototype for a safe, read-only Linux endpoint agent.
-The long-term target is a native Linux service managed by `systemd`;
-Docker is used here only as a controlled development harness.
+Cassandra answers questions about GW RTS infrastructure from bounded,
+read-only sources, and states which source each answer came from.
 
-This prototype intentionally does **not** expose arbitrary shell
-execution. It offers a small bounded operation API and records
-structured audit events so we can derive a finite operation catalog
-empirically.
+It is a **policy broker**, not an agent. A question goes to a model; the model
+may name an intent from a fixed list; the broker turns that intent into a route
+plan against exactly one source; a connector executes it and returns normalized
+evidence with its own counts. The model never reaches a source directly, and the
+only text it authors that a source executes is a single read-only SQL `SELECT`
+against one schema. Every decision is audited.
 
-## Phase One scope
+## What it can see
+
+| Source | What it knows |
+|---|---|
+| **Wazuh** | endpoint agent inventory, connection state, group membership |
+| **Zabbix** | triggers firing right now, and the event log for a past window |
+| **pegasusdb** | HPC job accounting — what jobs actually did, in MariaDB |
+| **Request Tracker** | open tickets in allowlisted queues, metadata only |
+| **cassd** | policy-approved reads from a Linux host: files, host facts, uptime, disk, network, listening ports |
+
+The point is the join. Zabbix reports what a monitor noticed, Request Tracker
+what a person reported, and neither knows a job failed; the accounting database
+knows the job failed and nothing about the alert or the ticket. A question that
+spans them has no single system to ask, which is the gap this fills.
+
+Adding a source is a defined exercise, not a fork: see
+[docs/adding-a-connector.md](docs/adding-a-connector.md). A connector is two
+methods and a normalization contract.
+
+## The endpoint agent
+
+`cassd` is one of those five sources — the one this repository also *implements*,
+since the other four are systems we query rather than run. It is a native Linux
+service under `systemd`, deployed on sgtstubby and winston. Docker appears in
+this repository only as a development harness for it.
+
+It intentionally does **not** expose arbitrary shell execution. It offers a
+small bounded operation API and records structured audit events, so the
+operation catalog is derived empirically rather than guessed.
 
 The compiled operation catalog is deliberately narrow:
 
@@ -31,14 +59,13 @@ All except `process.list` are enabled by default. Process inspection is
 an explicit opt-in and returns only PID, parent PID, name, and state; it
 never reads or returns command-line arguments.
 
-`host.uptime`, `host.diskfree` and `host.network` run programs. Every
-argument they pass is a compile-time constant, so nothing a caller sends
-reaches a command line and there is no parameter to validate; they take
-no target for that reason. No shell is involved, the child environment
-is emptied rather than inherited, and output is capped at the agent.
-`host.diskfree` runs both `df -h` and `df -i` because a filesystem can
-exhaust either alone, and `host.network` runs both `ip addr show` and
-`ip route show`.
+`host.uptime` and `host.diskfree` run programs. Every argument they pass is a
+compile-time constant, so nothing a caller sends reaches a command line and
+there is no parameter to validate; they take no target for that reason. No
+shell is involved, the child environment is emptied rather than inherited, and
+output is capped at the agent. `host.diskfree` runs both `df -h` and `df -i`,
+because a filesystem can exhaust either alone and one at 40% capacity with no
+inodes left still fails writes.
 
 `host.network` runs no program at all: it reads interfaces and addresses from
 netlink through the Go standard library and the routing tables from

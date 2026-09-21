@@ -8,6 +8,43 @@ The technical contract for a connector lives in
 [adding-a-connector.md](adding-a-connector.md). This document is about
 everything around it.
 
+## What you are joining
+
+Cassandra answers questions about infrastructure from bounded, read-only
+sources, and states which source each answer came from. It is a **policy
+broker**: a question goes to a model, the model may name an intent from a fixed
+list, the broker turns that intent into a route plan against exactly one
+source, and a connector executes it and returns normalized evidence.
+
+Five sources today:
+
+| Source | What it knows |
+|---|---|
+| **Wazuh** | endpoint agent inventory, connection state, group membership |
+| **Zabbix** | triggers firing right now, and the event log for a past window |
+| **pegasusdb** | HPC job accounting — what jobs actually did, in MariaDB |
+| **Request Tracker** | open tickets in allowlisted queues, metadata only |
+| **cassd** | policy-approved reads from a Linux host |
+
+The value is in the join, which is also why you are probably here: Zabbix
+reports what a monitor noticed, Request Tracker what a person reported, and
+neither knows a job failed. Adding a sixth source is the normal way this
+project grows, and the reason this document exists.
+
+Two things worth knowing before you read further, because they explain choices
+that otherwise look excessive:
+
+**The model never touches a source.** It names an intent; the broker builds the
+plan. The single exception is `database.query`, where the model authors one
+read-only `SELECT` against one schema — and that exception is bounded by a
+credential that can do nothing else.
+
+**An absence must never read as a zero.** Most of the peculiar-looking rules in
+this codebase — refusing a time bound on a current-state query, reporting a
+truncated page as truncated, naming a check that did not run — exist because an
+answer once looked complete and was not. If a rule seems paranoid, it is
+usually scar tissue, and the commit that added it says whose.
+
 ## Use your own accounts
 
 Work under your own Unix account on the runtime host and your own GitHub
