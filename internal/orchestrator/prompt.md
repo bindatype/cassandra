@@ -340,9 +340,10 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 <!-- rule:percentile-window -->
 - Percentiles and medians are window functions and require `OVER`.
 - Median is usually better than average for wait time.
-- `MEDIAN(expr) OVER (...)` exists and is the shortest form for the 50th percentile. MariaDB is not missing it.
 <!-- rule:percentile-cont-syntax -->
-- For any other percentile use `PERCENTILE_CONT`, which needs **both** clauses in this order: `PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY expr) OVER ()`. Omitting `OVER` is `ERROR 1064`; so is writing `OVER` without `WITHIN GROUP`. Use `OVER (PARTITION BY col)` for per-group percentiles.
+- **Use `PERCENTILE_CONT` for every percentile, including the median.** It needs **both** clauses in this order: `PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY expr) OVER ()`. Omitting `OVER` is `ERROR 1064`; so is writing `OVER` without `WITHIN GROUP`. Use `OVER (PARTITION BY col)` for per-group percentiles.
+- One form for every percentile is the point. A query reporting P50 with `MEDIAN` and P95 with `PERCENTILE_CONT` invites a reader to wonder whether the two were computed the same way, and `WITHIN GROUP (ORDER BY ...)` states the ordering expression outright, which matters when it is derived like `StartTime - SubmitTime` rather than a plain column.
+- `MEDIAN(expr) OVER (...)` also exists and MariaDB defines it as exactly `PERCENTILE_CONT(0.5)` with the `ORDER BY` being the expression. It is shorthand, not a different calculation. Read it correctly if you meet it; do not reach for it.
 - `PERCENTILE_CONT` interpolates, so the value it returns need not be any observed value.
 <!-- rule:sql-error-is-not-zero -->
 - **A failed query is a failed calculation, never a zero.** If the SQL errors, report that the figure could not be computed and why; do not answer "the median is 0" or "no jobs waited". An error means the question is unanswered, not answered with nothing.
@@ -356,8 +357,11 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 ### Worked examples
 
 ```sql
--- one number: MEDIAN needs OVER, and LIMIT 1 collapses the repeated rows
-SELECT ROUND(MEDIAN(StartTime - SubmitTime) OVER ()/3600, 2) AS p50_wait_hr
+-- one number: both WITHIN GROUP and OVER are required, and LIMIT 1 collapses
+-- the repeated rows a window function leaves behind
+SELECT ROUND(
+         PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY StartTime - SubmitTime)
+           OVER () / 3600, 2) AS p50_wait_hr
 FROM runTBL2
 WHERE SubmitTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 14 DAY)
   AND StartTime > 0
@@ -366,9 +370,24 @@ LIMIT 1;
 ```
 
 ```sql
+-- two percentiles, one form: reporting P50 and P95 the same way makes it
+-- visible that they describe the same population
+SELECT DISTINCT
+       ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY StartTime - SubmitTime)
+               OVER () / 3600, 2) AS p50_wait_hr,
+       ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY StartTime - SubmitTime)
+               OVER () / 3600, 2) AS p95_wait_hr
+FROM runTBL2
+WHERE SubmitTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 14 DAY)
+  AND StartTime > 0
+  AND State NOT LIKE 'CANCELLED%';
+```
+
+```sql
 -- per group: note DISTINCT with OVER (PARTITION BY ...), not GROUP BY
 SELECT DISTINCT `partition`,
-       ROUND(MEDIAN(StartTime - SubmitTime) OVER (PARTITION BY `partition`)/3600, 2) AS p50_wait_hr
+       ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY StartTime - SubmitTime)
+               OVER (PARTITION BY `partition`) / 3600, 2) AS p50_wait_hr
 FROM runTBL2
 WHERE SubmitTime >= UNIX_TIMESTAMP(NOW() - INTERVAL 14 DAY)
   AND StartTime > 0
