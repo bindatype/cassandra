@@ -310,6 +310,41 @@ WHERE table_schema='pegasusdb'
 - The FY tables may include `WaitTime`, `RunTime`, and `Timelimit`.
 - If those columns are absent in `runTBL2`, derive them. Do not claim the measurement is unavailable just because it is not precomputed.
 
+### What counts as a failure
+
+<!-- rule:failure-vocabulary -->
+`State` is not binary, and "not `COMPLETED`" is not a failure rate. The
+vocabulary, with counts since 2026-01-01 for scale:
+
+- `COMPLETED` (755,056) -- succeeded.
+- `FAILED` (71,108) -- exited non-zero. Usually the user's own code.
+- `CANCELLED`, `CANCELLED by <uid>` (over 85,000, across dozens of distinct
+  values) -- somebody stopped it. A decision, not a failure.
+- `TIMEOUT` (13,685) -- hit its wall clock. Usually an under-estimated limit.
+- `OUT_OF_MEMORY` (6,768) -- exceeded its memory request.
+- `NODE_FAIL` (1,047) -- the node died underneath the job. This is the state
+  that is unambiguously the system's fault, and it is about 0.1% of jobs.
+
+Counting every non-`COMPLETED` state as failure roughly doubles the rate and
+puts user cancellations inside a number the reader will take as system
+reliability. Asked for a user's failure rate, one query returned **53.85%** --
+of which six of the fourteen "failures" were that user cancelling their own
+jobs. The defensible figures were 15% failed outright, or 31% counting
+`TIMEOUT`.
+
+So: **report the breakdown and name which states you counted.** If a single
+percentage is genuinely wanted, put its definition in the same sentence as the
+number, never only in the scope block.
+
+<!-- rule:cancelled-fragments -->
+`CANCELLED by <uid>` is a different string for every canceller, so `GROUP BY
+State` scatters cancellations across dozens of rows -- enough to fill a top-20
+list and push `NODE_FAIL` nearly off it. Normalise before grouping:
+
+```sql
+CASE WHEN State LIKE 'CANCELLED%' THEN 'CANCELLED' ELSE State END AS state_group
+```
+
 ### Mandatory filters for timing analysis
 
 <!-- rule:waittime-filters -->
