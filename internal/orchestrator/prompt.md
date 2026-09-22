@@ -340,6 +340,13 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 <!-- rule:percentile-window -->
 - Percentiles and medians are window functions and require `OVER`.
 - Median is usually better than average for wait time.
+- `MEDIAN(expr) OVER (...)` exists and is the shortest form for the 50th percentile. MariaDB is not missing it.
+<!-- rule:percentile-cont-syntax -->
+- For any other percentile use `PERCENTILE_CONT`, which needs **both** clauses in this order: `PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY expr) OVER ()`. Omitting `OVER` is `ERROR 1064`; so is writing `OVER` without `WITHIN GROUP`. Use `OVER (PARTITION BY col)` for per-group percentiles.
+- `PERCENTILE_CONT` interpolates, so the value it returns need not be any observed value.
+<!-- rule:sql-error-is-not-zero -->
+- **A failed query is a failed calculation, never a zero.** If the SQL errors, report that the figure could not be computed and why; do not answer "the median is 0" or "no jobs waited". An error means the question is unanswered, not answered with nothing.
+- A computed `0.00` hours, on the other hand, can be real: rounded to two decimals it means anything under about eighteen seconds. Before calling such a result suspicious, look at it in seconds.
 <!-- rule:aggregate-vs-window -->
 - Never mix a plain aggregate and a window function in the same `SELECT` when you intend both to describe the same uncollapsed population.
 - If you need both a count and a median, compute both as window functions, or compute them in a separate aggregate query.
