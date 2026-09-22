@@ -356,6 +356,19 @@ CASE WHEN State LIKE 'CANCELLED%' THEN 'CANCELLED' ELSE State END AS state_group
 - For runtime analysis, use only completed jobs:
   - `State = 'COMPLETED'`
 - Do not treat cancelled, failed, timed-out, or still-running jobs as completed runtimes.
+<!-- rule:filters-belong-in-where -->
+- **Every filter you will describe goes in the `WHERE` clause.** A condition
+  written inside one column's `CASE` narrows that column and nothing else, and
+  a window function in the same `SELECT` still sees every row the `WHERE` let
+  through. Observed: a per-partition query put `StartTime > 0 AND State NOT
+  LIKE 'CANCELLED%'` inside `AVG(CASE WHEN ...)` while computing the median
+  with `PERCENTILE_CONT(...) OVER (PARTITION BY ...)`, which had no such
+  filter. The mean described started, non-cancelled jobs; the median described
+  every job; the scope block described both as filtered. Two populations, one
+  row, one caption.
+- If two figures genuinely need different populations, either run two queries
+  or label each column with its own population. One scope line must never
+  describe two.
 - State the filters you used.
 - State how many rows the statistic was computed over, if that count is available from the evidence summary or from a SQL aggregate you explicitly requested.
 
