@@ -119,18 +119,31 @@ func TestPromptRetainsItsHardWonRules(t *testing.T) {
 }
 
 func TestPromptAndEvidenceLeaveRoomToAnswer(t *testing.T) {
-	// Every model on this gateway is capped at 32k tokens regardless of its
-	// native context, which is roughly 128 KB. The prompt and a maximal
-	// evidence payload both travel on the synthesis turn, so together they must
-	// leave room for the question, the tool call and an answer of useful
-	// length. Three quarters is the line.
-	const window = 32000 * 4
-	// The compiled defaults, not the environment override: this asserts that
-	// the shipped configuration is safe for the models actually in use.
-	used := len(systemPrompt) + maxEvidenceJSON
-	if used > window*3/4 {
-		t.Errorf("prompt (%d) plus max evidence (%d) is %d of a %d byte window, leaving %d for the answer",
-			len(systemPrompt), maxEvidenceJSON, used, window, window-used)
+	// The prompt and a maximal evidence payload both travel on the synthesis
+	// turn, so together they must leave room for the question, the tool call
+	// and an answer of useful length. Three quarters is the line.
+	//
+	// This used to hardcode `32000 * 4`, with a comment that every model on
+	// the gateway was capped at 32k tokens regardless of its native context.
+	// That was true, and stopped being true when the backend moved to vLLM.
+	// servedContextTokens was re-measured to 131072 and this was not, so the
+	// guard went on enforcing a ceiling four times lower than the real one --
+	// the same two-copies-of-a-number drift this project keeps finding.
+	//
+	// Deriving it from servedContextTokens and the measured character ratios
+	// means the two cannot disagree again, and it counts tokens rather than
+	// bytes, which is what the window is actually denominated in. Prose and
+	// JSON are counted at their own ratios because a byte of evidence costs
+	// nearly twice a byte of prompt.
+	promptTokens := int(float64(len(systemPrompt)) / proseCharsPerToken)
+	evidenceBytes := maxEvidenceJSON
+	evidenceTokens := int(float64(evidenceBytes) / jsonCharsPerToken)
+	used := promptTokens + evidenceTokens + answerReserveTokens
+
+	if used > servedContextTokens*3/4 {
+		t.Errorf("prompt (%d tokens) plus max evidence (%d tokens) plus the answer reserve (%d) "+
+			"is %d of %d served tokens, past the three-quarter line",
+			promptTokens, evidenceTokens, answerReserveTokens, used, servedContextTokens)
 	}
 }
 

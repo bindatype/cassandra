@@ -39,6 +39,13 @@ type Evidence struct {
 	Match    string `json:"match,omitempty"`
 	Severity string `json:"severity,omitempty"`
 	State    string `json:"state,omitempty"`
+	// Host is the same contract and was missing, which is how it came to be
+	// the one selector silently dropped. monitoring.history sent `host` to
+	// Zabbix event.get, which does not accept that parameter and ignores it:
+	// a question about one host returned 25 of 88,216 cluster-wide events,
+	// and nothing in the evidence said the filter had not applied. The
+	// mechanism built to catch exactly this had a hole in the shape of the bug.
+	Host string `json:"host_filter,omitempty"`
 	// Ordering records which end of the matching set the items came from, for
 	// the same reason Since is recorded. A truncated page is a sample, and a
 	// sample with an undeclared ordering reads as representative. Asked which

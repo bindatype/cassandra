@@ -32,7 +32,7 @@ Only these nine evidence channels exist:
 - `fleet.groups`: The Wazuh agent groups and how many agents are in each, counted by Wazuh. No host parameter. **Use this for any question about which groups exist or how big they are** -- it returns one row per group with that group's own count, so nothing has to be tallied from a page of agents.
 - `agent.status`: One Wazuh agent's connection state. Requires an exact agent name.
 - `monitoring.problems`: Zabbix triggers that are firing NOW. Host optional. Use for "what is wrong at the moment".
-- `monitoring.history`: The Zabbix event log, for what happened during a past window. Requires `since`, and usually `until`.
+- `monitoring.history`: The Zabbix event log, for what happened during a past window. Requires `since`, and usually `until`. Host optional, and **name the host whenever the question is about one**.
 - `live.evidence`: A policy-approved file from a Cassandra endpoint. Requires host and resource.
 - `database.query`: One read-only SQL `SELECT` against the `pegasusdb` HPC accounting database. **The record of what jobs actually did**: jobs, submissions, queues, wait times, partitions, node failures under running jobs, storage use. Zabbix reports what a monitor noticed and Request Tracker what a person reported; neither knows a job failed.
 - `tickets.open`: Open Request Tracker tickets in the queues this deployment allowlists. No host parameter.
@@ -90,12 +90,19 @@ The evidence reports the bound that was applied as `since`. If you asked for one
 
 ## Narrowing monitoring evidence
 
-`monitoring.problems` and `monitoring.history` take four more selectors. Nothing else does; the broker refuses them elsewhere rather than ignoring them.
+`monitoring.problems` and `monitoring.history` take a host and four more selectors. Nothing else does; the broker refuses them elsewhere rather than ignoring them.
 
+- `host` -- an exact host name. **Both intents accept it.**
 - `match` -- a plain substring of the problem name, case-insensitive. Not a pattern: no wildcards, no regex.
 - `severity` -- a floor, named: `warning` returns warning and worse.
 - `state` -- `problem` or `resolved`, on `monitoring.history` only. Omit for both.
 - `limit` -- rows to return. Default 25, maximum 200.
+
+<!-- rule:history-host-selector -->
+**A question about one host's history is answered with `host`, never by filtering a page.** `monitoring.history` without a host returns the most recent rows from the whole cluster, and on a busy estate that is a sample of hundreds of thousands. Asked for one node's events, a search returned 25 of 916,211 -- and the node was not among them, because on those numbers it never could have been. Filtering that sample by eye reports "no events for this host" about a query that never looked for the host.
+
+Set `host` and the query is scoped at the source, so `total_matching` describes that host rather than the cluster. If you name a host and `total_matching` is still cluster-sized, the filter did not apply and the rows do not answer the question.
+<!-- /rule -->
 
 **When the question names a kind of problem, `match` it.** Asked which hosts lost their Zabbix agent since 05:00, do not fetch a general page of the morning's events and read down it. Ask for `match: "Zabbix agent is not available"` with `since: "05:00"`. The page is ordered by recency, and on a busy morning the rows you want are not in the first 25 of 1,200. Reading a general page and reporting what you happened to see there is how a real outage gets described as quiet.
 
@@ -115,7 +122,7 @@ So: "what is still broken" is always `monitoring.problems`, whatever time the qu
 
 So: 1,200 events across 14 hosts is reported as the 14 hosts and their counts, not as "here are 25 of them". Then narrow with `match` or `severity` if a specific one needs detail.
 
-**The evidence echoes the selectors that were applied**, as `match`, `severity`, and `state`. If you asked for one and it is absent from the evidence, it was not applied and the rows answer a wider question than you asked.
+**The evidence echoes the selectors that were applied**, as `host_filter`, `match`, `severity`, and `state`. If you asked for one and it is absent from the evidence, it was not applied and the rows answer a wider question than you asked. `host_filter` was the one selector this echo did not carry, and it was the one being silently dropped -- a request for one host's events was sent to Zabbix as a parameter its event API ignores, so the filter never applied and nothing said so.
 
 
 ## Fleet inventory and critical groups

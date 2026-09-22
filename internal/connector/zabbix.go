@@ -202,6 +202,7 @@ func (c *ZabbixConnector) Execute(ctx context.Context, step broker.RouteStep) (E
 		Until:          step.Until,
 		Match:          step.Match,
 		Severity:       step.Severity,
+		Host:           step.Host,
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -236,8 +237,27 @@ func (c *ZabbixConnector) executeEvents(ctx context.Context, step broker.RouteSt
 		"sortorder":   "DESC",
 		"limit":       limit,
 	}
+	// event.get does not accept `host`. It accepts `hostids`, and it ignores
+	// parameters it does not know rather than rejecting them -- so sending
+	// `host` here filtered nothing and said nothing. Asked for one host's
+	// events, this returned 25 of 88,216 from the whole cluster, and the
+	// census ran with the same params so even the total was unfiltered.
+	//
+	// trigger.get does accept `host`, which is why monitoring.problems was
+	// unaffected and why the mistake survived.
 	if step.Host != "" {
-		params["host"] = step.Host
+		hostIDs, err := c.resolveHostIDs(ctx, step.Host)
+		if err != nil {
+			return Evidence{}, err
+		}
+		if len(hostIDs) == 0 {
+			// Returning the cluster's events for a host Zabbix has never heard
+			// of is the worst available answer: it is voluminous, confident,
+			// and about other machines.
+			return Evidence{}, newConnectorError("unknown_host",
+				"zabbix does not monitor a host named "+step.Host+"; no event history can be scoped to it")
+		}
+		params["hostids"] = hostIDs
 	}
 	from, till, err := windowOf(step)
 	if err != nil {
@@ -325,6 +345,8 @@ func (c *ZabbixConnector) executeEvents(ctx context.Context, step broker.RouteSt
 		Match:          step.Match,
 		Severity:       step.Severity,
 		State:          step.State,
+		Host:           step.Host,
+		Ordering:       "newest first by event time",
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -754,23 +776,53 @@ func (c *ZabbixConnector) exactCensus(ctx context.Context, method string, params
 
 // hostExists reports whether Zabbix monitors a host by this exact name.
 func (c *ZabbixConnector) hostExists(ctx context.Context, host string) (bool, error) {
-	payload, err := c.rawCall(ctx, "host.get", map[string]any{
-		"filter": map[string]any{"host": []string{host}},
-		"output": []string{"hostid"},
-		"limit":  1,
-	})
+	ids, err := c.resolveHostIDs(ctx, host)
 	if err != nil {
 		return false, err
 	}
+	return len(ids) > 0, nil
+}
+
+// resolveHostIDs turns a host name into the ids event.get will actually filter
+// on. It already existed inside hostExists, which resolved the id and threw it
+// away; the throwing away is why event.get was handed a name it cannot use.
+//
+// An empty result is not an error here. The caller decides what absence means:
+// for a trigger count it is "the host may not exist", and for event history it
+// is a refusal.
+func (c *ZabbixConnector) resolveHostIDs(ctx context.Context, host string) ([]string, error) {
+	payload, err := c.rawCall(ctx, "host.get", map[string]any{
+		"filter": map[string]any{"host": []string{host}},
+		"output": []string{"hostid"},
+	})
+	if err != nil {
+		return nil, err
+	}
 	var envelope struct {
-		Result []struct {
+		Result *[]struct {
 			HostID string `json:"hostid"`
 		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+			Data    string `json:"data"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return false, newConnectorError("decode_response", err.Error())
+		return nil, newConnectorError("decode_response", err.Error())
 	}
-	return len(envelope.Result) > 0, nil
+	if envelope.Error != nil {
+		return nil, newConnectorError("zabbix_error", envelope.Error.Message+": "+envelope.Error.Data)
+	}
+	if envelope.Result == nil {
+		return nil, newConnectorError("decode_response", "zabbix host.get returned no result")
+	}
+	ids := make([]string, 0, len(*envelope.Result))
+	for _, entry := range *envelope.Result {
+		if entry.HostID != "" {
+			ids = append(ids, entry.HostID)
+		}
+	}
+	return ids, nil
 }
 
 // zabbixTrigger mirrors only the fields we consume. Additional fields in a
