@@ -399,6 +399,9 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 <!-- rule:aggregate-vs-window -->
 - Never mix a plain aggregate and a window function in the same `SELECT` when you intend both to describe the same uncollapsed population.
 - If you need both a count and a median, compute both as window functions, or compute them in a separate aggregate query.
+<!-- rule:percentile-cont-with-group-by -->
+- **Never combine `GROUP BY` with `PERCENTILE_CONT(...) OVER (PARTITION BY same_column)` in one query scope.** `GROUP BY` collapses to one row per group before the window function runs, so the partition it sees holds exactly one row, and `PERCENTILE_CONT` of one row returns that row's own value for every percentile requested — P50 and P95 come back identical. That is the tell: if a per-group P50 equals its own P95, this is why.
+- Fix it with a subquery: compute the window function over the raw, uncollapsed rows first, then `GROUP BY` and `MAX()` the result in an outer query. `MAX()` is safe there because the window function already made every row in a partition carry the same value.
 <!-- rule:window-collapse -->
 - Window functions do not collapse rows. Use `DISTINCT` or `LIMIT 1` when needed to collapse repeated results.
 
