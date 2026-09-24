@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+const commandOutputHelperMarker = "emit-command-output"
 
 func withCommandOperations(t *testing.T, table map[string][]commandStep) {
 	t.Helper()
@@ -98,15 +102,35 @@ func TestCommandOperationRefusesSilentEmptySuccess(t *testing.T) {
 }
 
 func TestCommandStepCapsOutputAndSaysSo(t *testing.T) {
-	big := strings.Repeat("x", commandMaxOutput*2)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test executable: %v", err)
+	}
 	result := newCommandService().runCommandStep(context.Background(), commandStep{
-		Label: "flood", Path: "/bin/echo", Args: []string{big},
+		Label: "flood",
+		Path:  executable,
+		Args:  []string{"-test.run=^TestCommandOutputHelper$", "--", commandOutputHelperMarker},
 	})
+	if result.Failed {
+		t.Fatalf("output helper failed: %s", result.Failure)
+	}
 	if !result.Truncated {
 		t.Error("oversized output was not marked truncated")
 	}
 	if len(result.Stdout) > commandMaxOutput {
 		t.Errorf("stdout is %d bytes, over the %d cap", len(result.Stdout), commandMaxOutput)
+	}
+}
+
+// TestCommandOutputHelper is run in a child test process so the truncation
+// test does not depend on platform-specific limits for a single argument.
+func TestCommandOutputHelper(t *testing.T) {
+	for _, arg := range os.Args {
+		if arg != commandOutputHelperMarker {
+			continue
+		}
+		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", commandMaxOutput*2))
+		os.Exit(0)
 	}
 }
 

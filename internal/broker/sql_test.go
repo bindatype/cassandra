@@ -5,6 +5,68 @@ import (
 	"testing"
 )
 
+// Hermes reported this exact shape after askcass used it for several research
+// groups. LIMIT 1 does not make it correct: live, this returned a median of 0
+// for MG-anenberggrp while the all-window equivalent returned 0.000278 hours
+// over the same 217 rows.
+const brokenAggregateWindowQuery = `
+SELECT COUNT(*) AS total_jobs,
+       AVG(NCPUS) AS avg_ncpus,
+       AVG(NNodes) AS avg_nnodes,
+       AVG(Timelimit) AS avg_timelimit,
+       ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY WaitTime)
+         OVER () / 3600, 2) AS median_wait_hr
+FROM jobs2VIEW
+WHERE groupName = 'MG-anenberggrp'
+  AND SubmitTime >= UNIX_TIMESTAMP('2026-05-09')
+LIMIT 1`
+
+func TestValidateQueryRejectsPlainAggregateBesideWindow(t *testing.T) {
+	err := ValidateQuery(brokenAggregateWindowQuery)
+	if err == nil {
+		t.Fatal("must reject: the aggregate collapses the rows before PERCENTILE_CONT runs")
+	}
+	for _, want := range []string{"collapses", "one row", "OVER"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error must explain how to repair the query; missing %q in %v", want, err)
+		}
+	}
+}
+
+func TestValidateQueryAcceptsAllWindowEquivalent(t *testing.T) {
+	query := `SELECT COUNT(*) OVER () AS total_jobs,
+       AVG(NCPUS) OVER () AS avg_ncpus,
+       ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY WaitTime)
+         OVER () / 3600, 2) AS median_wait_hr
+FROM jobs2VIEW
+WHERE groupName = 'MG-anenberggrp'
+LIMIT 1`
+	if err := ValidateQuery(query); err != nil {
+		t.Fatalf("all calculations see the same uncollapsed window: %v", err)
+	}
+}
+
+func TestValidateQueryRejectsAggregateWindowInsideSubquery(t *testing.T) {
+	query := `SELECT broken.* FROM (
+    SELECT COUNT(*) AS total_jobs,
+           PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY WaitTime) OVER () AS p50
+    FROM jobs2VIEW
+) broken`
+	if err := ValidateQuery(query); err == nil {
+		t.Fatal("a nested SELECT must not hide the same aggregate/window defect")
+	}
+}
+
+func TestValidateQueryIgnoresSQLWordsInStringsAndComments(t *testing.T) {
+	query := `SELECT COUNT(*) AS jobs,
+       'PERCENTILE_CONT(0.5) OVER ()' AS explanation
+FROM jobs2VIEW
+/* OVER () is documentation, not a window function. */`
+	if err := ValidateQuery(query); err != nil {
+		t.Fatalf("SQL-looking prose must not trigger the guard: %v", err)
+	}
+}
+
 // The exact query a live askcass run produced on 2026-09-23, asked to report
 // each of seven research groups' completed job count and median and 95th
 // percentile wait time. It ran, and returned a P50 equal to its own P95 for

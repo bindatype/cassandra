@@ -57,6 +57,13 @@ func ValidateQuery(query string) error {
 		return fmt.Errorf("only a single statement is allowed")
 	}
 
+	if conflictingUngroupedAggregateWindow(withoutTrailing) {
+		return fmt.Errorf("plain aggregate and window function appear in the same SELECT without GROUP BY; " +
+			"the aggregate collapses the input to one row before the window runs, so the window sees one row. " +
+			"Write COUNT/AVG as window functions with OVER (), or compute the aggregate and window calculation " +
+			"in separate query scopes")
+	}
+
 	// A live askcass run terminated its GROUP BY with a semicolon --
 	// "GROUP BY groupName;" -- which the check below reads as one clause
 	// item, and its own comma-split never separated the identifier from the
