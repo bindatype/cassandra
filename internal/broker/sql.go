@@ -56,5 +56,17 @@ func ValidateQuery(query string) error {
 		return fmt.Errorf("only a single statement is allowed")
 	}
 
+	// See sql_group_partition.go: GROUP BY collapses to one row per group
+	// before a window function runs, so PARTITION BY on that same column, in
+	// the same scope, sees a partition of exactly one row -- PERCENTILE_CONT
+	// then returns that row's own value for every percentile asked.
+	if column, ok := conflictingGroupByPartitionColumn(trimmed); ok {
+		return fmt.Errorf("GROUP BY and PARTITION BY both name %q in the same query scope; "+
+			"GROUP BY collapses to one row per group before the window function runs, so "+
+			"PERCENTILE_CONT sees one row per partition and returns it for every percentile "+
+			"requested. Compute the window function over the raw rows in a subquery, then "+
+			"GROUP BY the result in an outer query", column)
+	}
+
 	return nil
 }
