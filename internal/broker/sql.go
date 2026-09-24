@@ -52,15 +52,27 @@ func ValidateQuery(query string) error {
 
 	// This server accepts stacked statements, so a trailing second statement
 	// would run unseen by whatever recorded the first.
-	if strings.Contains(strings.TrimRight(trimmed, "; \t\n\r"), ";") {
+	withoutTrailing := strings.TrimRight(trimmed, "; \t\n\r")
+	if strings.Contains(withoutTrailing, ";") {
 		return fmt.Errorf("only a single statement is allowed")
 	}
 
+	// A live askcass run terminated its GROUP BY with a semicolon --
+	// "GROUP BY groupName;" -- which the check below reads as one clause
+	// item, and its own comma-split never separated the identifier from the
+	// punctuation stuck to it. "groupname;" then never matched "groupname",
+	// and the guard missed exactly the query it exists to catch: confirmed
+	// live on 2026-09-24, the model wrote GROUP BY groupName after already
+	// having it rejected without the semicolon, and this time it was
+	// allowed. Checking withoutTrailing rather than trimmed removes the
+	// punctuation before either clause is ever read, for this check and any
+	// added after it.
+	//
 	// See sql_group_partition.go: GROUP BY collapses to one row per group
 	// before a window function runs, so PARTITION BY on that same column, in
 	// the same scope, sees a partition of exactly one row -- PERCENTILE_CONT
 	// then returns that row's own value for every percentile asked.
-	if column, ok := conflictingGroupByPartitionColumn(trimmed); ok {
+	if column, ok := conflictingGroupByPartitionColumn(withoutTrailing); ok {
 		return fmt.Errorf("GROUP BY and PARTITION BY both name %q in the same query scope; "+
 			"GROUP BY collapses to one row per group before the window function runs, so "+
 			"PERCENTILE_CONT sees one row per partition and returns it for every percentile "+

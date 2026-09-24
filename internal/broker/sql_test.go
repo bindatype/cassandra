@@ -49,6 +49,32 @@ FROM (
 ) sub
 GROUP BY groupName`
 
+// The literal query the live guard-verification run produced on 2026-09-24,
+// terminated with a semicolon the way a model actually writes one and the
+// hand-written fixture above did not. readColumnList's comma-split kept the
+// semicolon stuck to the last identifier -- "groupname;" never matched
+// "groupname" -- and this exact query was allowed to run, 7 rows, one per
+// group, none of it caught. Confirmed with a minimal repro before the fix
+// and re-run after it; this is that query, kept as a permanent regression
+// rather than trusted to the fixture above to cover.
+const brokenGroupByPartitionQueryWithSemicolon = "SELECT groupName,\n" +
+	"       COUNT(*) AS completed_jobs,\n" +
+	"       ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY StartTime - SubmitTime) OVER (PARTITION BY groupName) / 3600, 2) AS p50_wait_hr,\n" +
+	"       ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY StartTime - SubmitTime) OVER (PARTITION BY groupName) / 3600, 2) AS p95_wait_hr\n" +
+	"FROM runTBL2\n" +
+	"WHERE SubmitTime >= UNIX_TIMESTAMP('2026-05-10')\n" +
+	"  AND groupName IN ('MG-anenberggrp', 'MG-cbi', 'MG-diaolab', 'MG-guoqinggrp', 'MG-liu_price_lab', 'MG-pittmangrp', 'MG-rahlab')\n" +
+	"  AND State = 'COMPLETED'\n" +
+	"  AND StartTime > 0\n" +
+	"  AND State NOT LIKE 'CANCELLED%'\n" +
+	"GROUP BY groupName;"
+
+func TestValidateQueryRejectsGroupByPartitionCollisionWithTrailingSemicolon(t *testing.T) {
+	if err := ValidateQuery(brokenGroupByPartitionQueryWithSemicolon); err == nil {
+		t.Fatal("must reject: this exact query, semicolon included, was allowed to run live on 2026-09-24")
+	}
+}
+
 func TestValidateQueryRejectsGroupByPartitionCollision(t *testing.T) {
 	err := ValidateQuery(brokenGroupByPartitionQuery)
 	if err == nil {
