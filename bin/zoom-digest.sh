@@ -162,15 +162,21 @@ else
 	exit 1
 fi
 
-digest "Zabbix overnight" "what problems started since yesterday, and how many are there by severity?"
+digest "Zabbix overnight" "what problems started since yesterday, and how many are there by severity? Give the severity breakdown as a short bulleted list."
 # Critical groups are set by CASS_WAZUH_CRITICAL_GROUPS and marked in the
 # evidence before the model sees it, so this asks for a report rather than a
 # calculation.
-digest "Wazuh agents" "how many agents are disconnected right now, and are any of them in a critical group? Name the critical ones."
+digest "Wazuh agents" "how many agents are disconnected right now, and are any of them in a critical group? Name the critical ones as a short bulleted list."
 # Not "the last 24 hours": runTBL2 lags ingestion by about a day, so that
 # window holds only the leading edge and reads as an idle cluster every
 # morning. A complete past day is the honest question.
-digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, and what was the median wait time for the cpu partition and for the gpu partition? Say which day, and give wait times in seconds and minutes."
+#
+# P95 alongside P50: this is the same PARTITION BY-per-partition shape that
+# used to come back with P50 == P95 (GROUP BY collapsing each partition to
+# one row before the window ran, fixed 2026-09-25). Asking for tail latency
+# here is what that fix was for -- median alone hides a queue that is fine on
+# average and terrible in the tail.
+digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, and for the cpu partition and the gpu partition, what was the median (P50) and 95th percentile (P95) wait time? Say which day, give wait times in seconds and minutes, and list each partition's P50 and P95 as a short bulleted list."
 
 # Overnight tickets. "Still open" is not hedging: tickets.open selects
 # Status in (new, open, stalled), so a ticket raised at 22:00 and resolved
@@ -179,7 +185,7 @@ digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs c
 #
 # The timestamp is interpolated rather than described, so the model transcribes
 # a bound instead of deriving one.
-digest "New tickets overnight" "which tickets were created since $since_5pm and are still open? Group them by owner and give the total. If there are none, say so plainly."
+digest "New tickets overnight" "which tickets were created since $since_5pm and are still open? Group them by owner and give the total, listed as a short bulleted list by owner. If there are none, say so plainly."
 
 
 # A dry run deliberately writes no receipt. If it did, testing by hand would
