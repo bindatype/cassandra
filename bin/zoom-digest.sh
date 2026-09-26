@@ -185,7 +185,7 @@ digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs c
 #
 # The timestamp is interpolated rather than described, so the model transcribes
 # a bound instead of deriving one.
-digest "New tickets overnight" "which tickets were created since $since_5pm and are still open? Group them by owner and give the total, listed as a short bulleted list by owner. If there are none, say so plainly."
+digest "New tickets overnight" "which tickets were created since $since_5pm and are still open? List each one as a bulleted line with its subject and owner, and give the total. If there are none, say so plainly."
 
 
 # A dry run deliberately writes no receipt. If it did, testing by hand would
