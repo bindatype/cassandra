@@ -110,7 +110,7 @@ func (s *Service) Execute(ctx context.Context, req RequestEnvelope) (ResponseEnv
 		case operationHostNetwork:
 			data, truncated, apiErr = s.hostNetwork()
 		case operationHostUptime, operationHostDiskFree,
-			operationHostListeners, operationKernelMessages:
+			operationHostListeners, operationKernelMessages, operationHostGPU:
 			data, truncated, apiErr = s.runCommandOperation(ctx, req.Operation)
 		}
 	}

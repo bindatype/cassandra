@@ -271,6 +271,17 @@ func TestGrantRequiringCommandsAreNotShippedBlind(t *testing.T) {
 				"means it can only refuse until that grant is made", name)
 		}
 	}
+
+	// nvidia-smi needs the GPU device nodes visible, and the shipped unit sets
+	// PrivateDevices=yes: no /dev/nvidia* node exists in cassd's private /dev
+	// regardless of nvidia-smi's own permissions. A default-on host.gpu could
+	// only ever refuse until that grant is made.
+	for _, name := range defaultEnabledOperations() {
+		if name == operationHostGPU {
+			t.Errorf("%s is enabled by default, but PrivateDevices=yes in the shipped unit "+
+				"hides every GPU device node, so it can only refuse until that grant is made", name)
+		}
+	}
 }
 
 // Every command-backed operation that ships enabled must be one the sandbox
@@ -297,9 +308,32 @@ func TestDefaultEnabledCommandOperationsNeedNoGrant(t *testing.T) {
 // A limit a reader would otherwise have to discover must travel with the
 // result. A socket list with no process column looks complete.
 func TestOperationsWithHiddenLimitsCarryNotes(t *testing.T) {
-	for _, operation := range []string{operationHostListeners, operationKernelMessages} {
+	for _, operation := range []string{operationHostListeners, operationKernelMessages, operationHostGPU} {
 		if len(operationNotes[operation]) == 0 {
 			t.Errorf("%s has a limit that is invisible in its output but carries no note", operation)
+		}
+	}
+}
+
+// GPU count, memory, and utilization were the explicit ask; a query missing
+// any of them would silently under-report capacity rather than fail loudly.
+func TestGPUQueryAsksForCountMemoryAndUtilization(t *testing.T) {
+	steps := commandOperations[operationHostGPU]
+	if len(steps) != 1 {
+		t.Fatalf("host.gpu has %d steps, want exactly 1", len(steps))
+	}
+	var query string
+	for _, arg := range steps[0].Args {
+		if strings.HasPrefix(arg, "--query-gpu=") {
+			query = arg
+		}
+	}
+	if query == "" {
+		t.Fatal("host.gpu step has no --query-gpu argument")
+	}
+	for _, want := range []string{"index", "memory.total", "memory.used", "memory.free", "utilization.gpu"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("host.gpu query %q is missing %q", query, want)
 		}
 	}
 }

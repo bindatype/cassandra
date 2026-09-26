@@ -13,6 +13,7 @@ const (
 	operationHostNetwork          = "host.network"
 	operationHostListeners        = "host.listeners"
 	operationKernelMessages       = "kernel.messages"
+	operationHostGPU              = "host.gpu"
 )
 
 var operationCatalog = []OperationCapability{
@@ -28,6 +29,7 @@ var operationCatalog = []OperationCapability{
 	{Name: operationHostNetwork, Description: "Report interface addresses and the routing table together."},
 	{Name: operationHostListeners, Description: "List listening TCP and UDP sockets. Carries no process attribution."},
 	{Name: operationKernelMessages, Description: "Report kernel ring buffer entries at error and warning level."},
+	{Name: operationHostGPU, Description: "Report GPU inventory, memory, and utilization from nvidia-smi."},
 }
 
 var knownOperations = func() map[string]struct{} {

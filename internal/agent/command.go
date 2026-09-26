@@ -42,6 +42,35 @@ import (
 // SupplementaryGroups excludes systemd-journal. Shipping them would mean
 // exit code 0 with a well-formed answer describing almost nothing, which is
 // worse than not having them. They wait on a deliberate privilege grant.
+//
+// host.gpu (nvidia-smi) is declared in the catalog and in commandOperations
+// below, but is deliberately absent from defaultEnabledOperations for the
+// same reason: PrivateDevices=yes gives the unit a private, minimal /dev
+// containing only the standard pseudo devices, so /dev/nvidia0, /dev/nvidiactl
+// and /dev/nvidia-uvm do not exist in the namespace cassd sees, whatever
+// nvidia-smi's own permissions allow. This is a third instance of the same
+// class of problem that broke host.network twice (SELinux's nnp_transition on
+// `ip`, then AF_NETLINK missing from RestrictAddressFamilies): a sandbox
+// directive silently removing the exact thing the new operation needs, only
+// visible once it runs as the real hardened unit rather than as an
+// unprivileged test process. DynamicUser=yes compounds it -- no supplementary
+// groups -- so even a visible device node owned by `video` or `render` would
+// still be unreadable.
+//
+// Turning PrivateDevices=no off wholesale would fix this but throws away
+// device isolation for every other device on the box, not just the GPU --
+// out of proportion to what host.gpu needs. The narrower repair, following
+// the same "grant exactly what's needed and name why" precedent as the
+// AF_NETLINK addition, is to keep PrivateDevices=yes and add
+// BindPaths=/dev/nvidiaN (repeated per node) plus DevicePolicy=closed with an
+// explicit DeviceAllow= line per node, granting cgroup permission for
+// specifically those devices while every other device stays hidden. The exact
+// node set is driver- and host-dependent (typically /dev/nvidia0.. one per
+// GPU, /dev/nvidiactl, /dev/nvidia-uvm, sometimes /dev/nvidia-uvm-tools and
+// /dev/nvidia-modeset) and is not something this checkout can confirm --
+// verify with `ls -la /dev/nvidia*` and the node's owning group on the actual
+// target host before writing the unit change, the same way AF_NETLINK's need
+// was confirmed by measurement on sgtstubby rather than assumed.
 const (
 	commandTimeout   = 10 * time.Second
 	commandMaxOutput = 64 * 1024
@@ -64,6 +93,10 @@ var operationNotes = map[string][]string{
 	operationKernelMessages: {
 		"only error and warning level entries are returned, and the ring buffer holds a bounded " +
 			"window: an event older than the buffer is absent, not non-existent.",
+	},
+	operationHostGPU: {
+		"one row per physical GPU as nvidia-smi enumerates it; a GPU made invisible to this host " +
+			"by a hypervisor or MIG partitioning is absent from the count, not reported as zero.",
 	},
 }
 
@@ -96,6 +129,15 @@ var commandOperations = map[string][]commandStep{
 	// with stderr, not empty successes, so the operation reports why.
 	operationKernelMessages: {
 		{Label: "kernel", Path: "/usr/bin/dmesg", Args: []string{"-T", "--level=err,warn"}},
+	},
+	// Blocked by PrivateDevices=yes in the shipped unit -- see the package
+	// comment above. One row per GPU, machine-parseable and unit-free so a
+	// reader is not left guessing whether "8000" means MiB or bytes.
+	operationHostGPU: {
+		{Label: "gpu", Path: "/usr/bin/nvidia-smi", Args: []string{
+			"--query-gpu=index,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu",
+			"--format=csv,noheader,nounits",
+		}},
 	},
 }
 
