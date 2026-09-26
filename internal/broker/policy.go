@@ -125,7 +125,7 @@ func validateHostSelector(host string) error {
 func OperationTakesTarget(operation string) bool {
 	switch operation {
 	case "host.info", "host.uptime", "host.diskfree", "host.network",
-		"host.listeners", "kernel.messages", "capabilities.describe":
+		"host.listeners", "kernel.messages", "host.gpu", "capabilities.describe":
 		// These report facts about the machine rather than about a file. The
 		// command-backed ones take no target for a second reason as well: every
 		// argument they pass is a compile-time constant, so there is no place
@@ -198,7 +198,7 @@ func validateResource(resource Resource) error {
 		if params != (OperationParams{}) {
 			return fmt.Errorf("host.info does not accept parameters")
 		}
-	case "host.uptime", "host.diskfree", "host.network", "host.listeners", "kernel.messages":
+	case "host.uptime", "host.diskfree", "host.network", "host.listeners", "kernel.messages", "host.gpu":
 		// Command-backed operations take no parameters at all: every argument
 		// they pass is compiled in, which is the property that removes the
 		// injection class. A policy that tried to bound them would be
@@ -226,4 +226,5 @@ var routableOperations = map[string]bool{
 	"host.network":    true,
 	"host.listeners":  true,
 	"kernel.messages": true,
+	"host.gpu":        true,
 }

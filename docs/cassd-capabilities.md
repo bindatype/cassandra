@@ -1,6 +1,7 @@
 # cassd: capabilities, design, and what to add next
 
-**Status:** deployed on two hosts, answering. **Date:** 2026-09-17.
+**Status:** deployed on two hosts, answering. **Date:** 2026-09-17. Updated
+2026-09-26 to add `host.gpu`, disabled pending a device-node grant.
 **Audience:** external reviewers. Nothing here assumes prior context.
 
 `cassd` is the endpoint agent for Cassandra, an infrastructure question-answering
@@ -31,7 +32,7 @@ context for that.
 
 ### Operations
 
-Twelve are implemented in the agent. Ten are routable through the broker. What
+Thirteen are implemented in the agent. Eleven are routable through the broker. What
 is enabled in a given deployment is separate again, and set per host. The three
 sets are deliberately different, and a fourth distinction now matters: an
 operation can be implemented, routable, enabled, and still unusable because the
@@ -46,6 +47,7 @@ unit's sandbox forbids what it needs.
 | `host.network` | yes | yes | default on | — (native netlink, no exec) |
 | `host.listeners` | yes | yes | default on | — |
 | `kernel.messages` | yes | yes | **no** | `ProtectKernelLogs=no` **and** an SELinux policy module |
+| `host.gpu` | yes | yes | **no** | `PrivateDevices=yes` -- a `BindPaths=`/`DeviceAllow=` grant for the `/dev/nvidia*` nodes |
 | `filesystem.list` | yes | yes | yes | — |
 | `filesystem.stat` | yes | yes | yes | — |
 | `filesystem.tail` | yes | yes | yes | — |
@@ -90,6 +92,30 @@ in this repository is the source of truth for that unit and must be changed
 with it or the two drift. Note also that `kernel.dmesg_restrict` may be `1` on
 other hosts, where `dmesg` returns nothing regardless of the unit -- the
 operation reports the refusal and its stderr rather than an empty success.
+
+**`host.gpu` (nvidia-smi) is the same shape of gap, for a different reason.**
+Added 2026-09-26 to report GPU count, memory, and utilization -- the intended
+use is Grace Hopper hosts outside this project's current two, where GPU
+capacity is the actual point of asking. It is implemented and routable, and
+disabled everywhere, because `PrivateDevices=yes` in the shipped unit gives
+`cassd` a private, minimal `/dev` containing no `/dev/nvidia*` node at all,
+whatever nvidia-smi's own file permissions allow. `DynamicUser=yes` compounds
+it: no supplementary groups, so a node made visible but group-owned (`video`
+or `render`, commonly) would still be unreadable.
+
+Turning `PrivateDevices=no` off entirely would fix it but drops device
+isolation for every device on the box to grant access to one class of them.
+The narrower repair, the same shape as `AF_NETLINK` being added to
+`RestrictAddressFamilies` for `host.network` rather than opening every family,
+is `BindPaths=` for the specific `/dev/nvidia*` nodes plus
+`DevicePolicy=closed` with an explicit `DeviceAllow=` per node -- keeping
+`PrivateDevices=yes` for everything else. The exact node set is driver- and
+host-dependent (typically one `/dev/nvidiaN` per GPU plus `/dev/nvidiactl` and
+`/dev/nvidia-uvm`) and has not been measured on a target host; `ls -la
+/dev/nvidia*` there, the way `AF_NETLINK`'s need was confirmed by measurement
+on sgtstubby rather than assumed, is the next step before writing the unit
+change. `deploy/cassd.service` in this repository is the source of truth for
+that unit and must be changed with it or the two drift.
 
 Implementing an operation, exposing it through the broker, and enabling it on a
 host are three separate decisions. `process.list` is implemented and
