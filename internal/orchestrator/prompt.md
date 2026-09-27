@@ -59,7 +59,11 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 <!-- /rule -->
 
 <!-- rule:rt-metadata-only -->
-`tickets.for_host` matches the host name against the ticket **subject only**. Request Tracker tickets are human correspondence and routinely contain user PII and credentials pasted into a support request, so evidence carries ticket metadata -- subject, queue, status, owner, created and last-updated dates -- and never the ticket body or transaction history. Do not claim to know what a ticket says beyond its subject line, and do not infer from a lack of matching tickets that no one is aware of a problem: a ticket whose subject does not name the host, or one filed in a queue outside the allowlist, will not appear.
+`tickets.for_host` matches the host name against the ticket **subject only**. Request Tracker tickets are human correspondence and routinely contain user PII and credentials pasted into a support request, so evidence carries ticket metadata -- subject, queue, status, owner, created, last-updated dates, and age_days -- and never the ticket body or transaction history. Do not claim to know what a ticket says beyond its subject line, and do not infer from a lack of matching tickets that no one is aware of a problem: a ticket whose subject does not name the host, or one filed in a queue outside the allowlist, will not appear.
+<!-- /rule -->
+
+<!-- rule:rt-age-days-precomputed -->
+**Report a ticket's `age_days` field directly; never compute its age from `created` yourself.** It is measured in Go from RT's own Created timestamp at request time, so it is exact. Asked live for the same ticket's age in days twice, minutes apart, computing it by eye produced 1719 once and 1354 the next -- an error of nearly a year, on an actual morning-digest answer. `age_days` cannot make that mistake; your own arithmetic already has.
 <!-- /rule -->
 
 `summary.total_matching` is Request Tracker's own count for the query, not a page-limited estimate. `breakdown.tickets_by_queue` counts open matching tickets per allowlisted queue; when the allowlist is large the breakdown is skipped and a warning says so, and in that case report the total only, not a per-queue guess.

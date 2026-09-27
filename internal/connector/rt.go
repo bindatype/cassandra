@@ -619,6 +619,15 @@ func normalizeTicket(ticket rtTicket) EvidenceItem {
 	}
 	if ticket.Created != "" {
 		fields["created"] = ticket.Created
+		// Computed here rather than left for the model to work out from
+		// Created: asked twice, minutes apart, for the same ticket's age in
+		// days, the model answered 1719 once and 1354 the next time -- off by
+		// almost exactly a year, on a live morning-digest question. Created is
+		// RFC 3339 UTC (see rtDateBound), so this is exact where the model's
+		// own arithmetic was not.
+		if created, err := time.Parse(time.RFC3339, ticket.Created); err == nil {
+			fields["age_days"] = strconv.Itoa(int(time.Since(created).Hours() / 24))
+		}
 	}
 	if ticket.LastUpdated != "" {
 		fields["last_updated"] = ticket.LastUpdated

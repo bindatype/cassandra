@@ -324,6 +324,42 @@ func TestRTConnectorFiltersByCreatedDate(t *testing.T) {
 	}
 }
 
+// A live morning-digest question asked the model for the same ticket's age
+// in days twice, minutes apart, and got 1719 once and 1354 the next --
+// computing it from Created by eye rather than reading an exact value. This
+// is why age_days is computed here instead: not a nicety, a fix for a real
+// answer that was off by nearly a year.
+func TestRTConnectorComputesAgeDaysFromCreated(t *testing.T) {
+	const ageDays = 10
+	created := time.Now().UTC().Add(-time.Duration(ageDays)*24*time.Hour - time.Hour)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("per_page") == "1" {
+			w.Write([]byte(`{"total":1,"items":[]}`))
+			return
+		}
+		fmt.Fprintf(w, `{"total":1,"items":[
+			{"id":"1","Subject":"aging ticket","Status":"open","Queue":"Ops","Created":"%s"}
+		]}`, created.Format(time.RFC3339))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  50,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(evidence.Items) == 0 {
+		t.Fatal("no items returned")
+	}
+	if got := evidence.Items[0].Fields["age_days"]; got != fmt.Sprintf("%d", ageDays) {
+		t.Errorf("age_days = %q, want %d computed from Created, not left for the model to work out", got, ageDays)
+	}
+}
+
 func TestRTConnectorBreaksDownByOwner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
