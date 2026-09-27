@@ -137,31 +137,6 @@ digest() {
 POSTED=0
 UNSENT=0
 
-# The overnight ticket window, computed here rather than asked of the model.
-#
-# ParseSince accepts RFC 3339, a plain date, "24h"/"7d", and the words today
-# and yesterday -- there is no form that says "5pm yesterday". The alternatives
-# were to make the model author a timestamp, or to approximate with "12h".
-# Neither is right: a relative window drifts with the run time (12h from a
-# 04:45 start is 16:45, and a late or slow run moves it further), and asking a
-# model to work out yesterday-17:00-in-Eastern-across-a-DST-boundary is asking
-# it to do arithmetic the host can do exactly. If code can determine it, code
-# must.
-#
-# The offset form, not -u. `date -u -d "yesterday 17:00"` parses the INPUT as
-# UTC as well, yielding 17:00Z rather than 21:00Z, and would silently shift
-# this window by four hours in EDT.
-if since_5pm=$(date -d "yesterday 17:00" +%Y-%m-%dT%H:%M:%S%:z 2>/dev/null); then
-	: # GNU date
-elif since_5pm=$(date -v-1d -v17H -v0M -v0S +%Y-%m-%dT%H:%M:%S%z 2>/dev/null); then
-	# BSD date, for a developer running this on a Mac. Its %z has no colon,
-	# which RFC 3339 requires: -0400 becomes -04:00.
-	since_5pm=$(printf '%s' "$since_5pm" | sed 's/\(..\)$/:\1/')
-else
-	echo "zoom-digest: could not compute the overnight ticket window" >&2
-	exit 1
-fi
-
 digest "Zabbix overnight" "what problems started since yesterday, and how many are there by severity? Give the severity breakdown as a short bulleted list."
 # Critical groups are set by CASS_WAZUH_CRITICAL_GROUPS and marked in the
 # evidence before the model sees it, so this asks for a report rather than a
@@ -178,14 +153,28 @@ digest "Wazuh agents" "how many agents are disconnected right now, and are any o
 # average and terrible in the tail.
 digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, and for the cpu partition and the gpu partition, what was the median (P50) and 95th percentile (P95) wait time? Say which day, give wait times in seconds and minutes, and list each partition's P50 and P95 as a short bulleted list."
 
-# Overnight tickets. "Still open" is not hedging: tickets.open selects
-# Status in (new, open, stalled), so a ticket raised at 22:00 and resolved
-# before this runs does not appear. Saying "new tickets" would overstate what
-# the intent can see.
+# Longest-open tickets, not new ones: anyone can see what's new by logging
+# into RT itself, so that told the channel nothing it couldn't already see.
+# The oldest still-open tickets are the useful, non-obvious signal.
 #
-# The timestamp is interpolated rather than described, so the model transcribes
-# a bound instead of deriving one.
-digest "New tickets overnight" "which tickets were created since $since_5pm and are still open? List each one as a bulleted line with its subject and owner, and give the total. If there are none, say so plainly."
+# "Which tickets have been open longest" with no age bound leaves both since
+# and until empty, and tickets.open then defaults to newest-first (see
+# ticketOrder in internal/connector/rt.go) -- combined with the page
+# truncating at 100 of several hundred, that made the true oldest
+# unreachable. Confirmed live: asked that way, the model correctly refused
+# to guess rather than answer from the wrong page.
+#
+# Setting until with since empty is what flips the sort to oldest-first, per
+# the same convention documented in prompt.md for "tickets older than N
+# days". The 30-day floor barely matters -- ascending order surfaces the true
+# oldest first regardless of where it sits -- it mainly gives the disclosed
+# total a meaning: "N tickets older than a month" is its own backlog signal.
+#
+# RT still returns up to 100 rows (ticketSearchLimit in router.go, fixed
+# rather than caller-tunable) and the model narrows to five in its own
+# prose; asking RT itself for a page of five was considered and deliberately
+# skipped -- see the discussion this replaced.
+digest "Longest-open tickets" "which tickets are still open and were created more than 30 days ago? State the total number matching, then list only the 5 oldest, each as a bulleted line with its subject, owner, and how many days it has been open."
 
 
 # A dry run deliberately writes no receipt. If it did, testing by hand would
