@@ -109,7 +109,15 @@ func validateHostSelector(host string) error {
 		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '.' || char == '-' || char == '_' {
 			continue
 		}
-		return fmt.Errorf("host contains an unsupported character")
+		// The practical way this fires is a model asked about several hosts at
+		// once and wrote them as one comma- or "and"-joined string. Saying so
+		// directly, rather than leaving the model to guess and retry by
+		// bisecting the host list -- observed live, 2026-09-29: a four-host
+		// question cost six sequential calls before it worked out that each
+		// one wanted exactly one host.
+		return fmt.Errorf("host contains an unsupported character; it accepts only letters, digits, " +
+			"'.', '-', and '_', and exactly one hostname per call -- to ask about several hosts, " +
+			"call this once per host rather than combining them")
 	}
 	return nil
 }

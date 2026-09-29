@@ -113,6 +113,16 @@ prose but not `askcass` itself.
   X because the evidence was truncated/ordered wrong/out of scope" is
   `askcass` telling you exactly what it does and doesn't know. Pass that
   through rather than smoothing it into a guess.
+- **`host` takes exactly one hostname per call — never a list.** Asking about
+  several nodes in one question (`"...for gpu039, gpu002, hmm001, and
+  gpu004..."`) fails immediately with `host contains an unsupported
+  character`. Confirmed live, 2026-09-29: an agent that didn't know this
+  spent six sequential `askcass` calls bisecting a four-host question by
+  trial and error — each paying the full rebuild-on-every-run cost `askcass`
+  always pays — before landing on what was obvious from the start: one call
+  per host. For N hosts, make N separate `askcass "<question about one
+  host>"` calls directly. Don't try the combined phrasing first and don't
+  retry by splitting the list in half; go straight to one call per host.
 
 ## Verification
 
