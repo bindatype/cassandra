@@ -297,6 +297,11 @@ if python3 ./scripts/eval_rt_shape.py --self-test >/dev/null 2>&1; then
 else
 	bad "RT shape grader self-test" "$(python3 ./scripts/eval_rt_shape.py --self-test 2>&1 | head -3)"
 fi
+if python3 ./scripts/eval_pegasus.py --self-test >/dev/null 2>&1; then
+	ok "Pegasus grader self-test"
+else
+	bad "Pegasus grader self-test" "$(python3 ./scripts/eval_pegasus.py --self-test 2>&1 | head -3)"
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -gt 0 ]; then
