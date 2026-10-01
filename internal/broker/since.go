@@ -108,5 +108,10 @@ func ParseUntil(value string, ref time.Time) (time.Time, error) {
 	case "yesterday":
 		return midnight.UTC(), nil
 	}
-	return ParseSince(value, ref)
+	// ParseSince words its errors for since; this one is reporting on until.
+	moment, err := ParseSince(value, ref)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s", strings.Replace(err.Error(), "since", "until", 1))
+	}
+	return moment, nil
 }

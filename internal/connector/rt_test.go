@@ -615,18 +615,20 @@ func TestRTDateBoundRendersInRTsZone(t *testing.T) {
 // which tickets are seen at all.
 func TestTicketOrderFollowsTheBound(t *testing.T) {
 	for _, tc := range []struct {
-		name, since, until, want string
+		name, since, until, owner, want string
 	}{
-		{"older-than asks for the oldest", "", "2026-07-01T00:00:00Z", "ASC"},
-		{"since asks for the newest", "2026-09-01T00:00:00Z", "", "DESC"},
-		{"unbounded is a question about now", "", "", "DESC"},
+		{"older-than asks for the oldest", "", "2026-07-01T00:00:00Z", "", "ASC"},
+		{"since asks for the newest", "2026-09-01T00:00:00Z", "", "", "DESC"},
+		{"unbounded is a question about now", "", "", "", "DESC"},
 		// A window names both ends, and the newer one is the live edge; a
 		// reader asking about a window is not asking to start at its far end.
-		{"a window keeps the recent end", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "DESC"},
+		{"a window keeps the recent end", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "", "DESC"},
+		{"one owner reads oldest first with no bound", "", "", "aklwong@gwu.edu", "ASC"},
+		{"one owner with since still reads newest first", "2026-09-01T00:00:00Z", "", "aklwong@gwu.edu", "DESC"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ticketOrder(tc.since, tc.until); got != tc.want {
-				t.Errorf("ticketOrder(%q, %q) = %q, want %q", tc.since, tc.until, got, tc.want)
+			if got := ticketOrder(tc.since, tc.until, tc.owner); got != tc.want {
+				t.Errorf("ticketOrder(%q, %q, %q) = %q, want %q", tc.since, tc.until, tc.owner, got, tc.want)
 			}
 		})
 	}

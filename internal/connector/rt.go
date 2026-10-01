@@ -173,7 +173,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 
 	query := ticketSearchQuery(step.Host, step.Owner, since, until, c.queues)
 	requestedAt := time.Now().UTC()
-	order := ticketOrder(since, until)
+	order := ticketOrder(since, until, step.Owner)
 	items, total, err := c.search(ctx, query, limit, order)
 	if err != nil {
 		return Evidence{}, err
@@ -341,7 +341,14 @@ func rtDateBound(value string, loc *time.Location) (string, error) {
 // belongs at the top. The direction is taken from the bound rather than from
 // the question because the connector never sees the question, and the bound is
 // the part of it that survived into the plan.
-func ticketOrder(since, until string) string {
+//
+// One owner with no `since` is also oldest first: "what is X's oldest ticket"
+// otherwise pushed the model to invent an `until` purely to flip the order,
+// and its "10y" and "3650d" were refused and ended the session.
+func ticketOrder(since, until, owner string) string {
+	if since == "" && owner != "" {
+		return "ASC"
+	}
 	if until != "" && since == "" {
 		return "ASC"
 	}

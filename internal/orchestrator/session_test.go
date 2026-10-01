@@ -255,6 +255,9 @@ func TestRetryIsOfferedForMalformedCallsButNotRefusals(t *testing.T) {
 		{"malformed request", &broker.RouteError{Code: "invalid_request"}, true},
 		{"invalid query", &broker.RouteError{Code: "invalid_query"}, true},
 		{"missing host", &broker.RouteError{Code: "missing_host"}, true},
+		// Observed 2026-10-01: until "3650d" was refused and, not retryable,
+		// ended the session instead of letting the model drop the bound.
+		{"invalid until", &broker.RouteError{Code: "invalid_until"}, true},
 		{"unauthorized host", &broker.RouteError{Code: "host_not_authorized"}, false},
 		{"unauthorized resource", &broker.RouteError{Code: "resource_not_authorized"}, false},
 		{"unrelated error", errors.New("boom"), false},

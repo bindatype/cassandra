@@ -183,7 +183,7 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 						"type": "string",
 						"description": "For tickets.open and tickets.for_host only: one Request Tracker owner login exactly " +
 							"as evidence shows it (an @gwu.edu address), or Nobody for unowned tickets. One owner per " +
-							"call. With until and no since, that owner's oldest tickets come first.",
+							"call. With an owner and no since, that owner's oldest tickets come first; add no until for that.",
 					},
 					"match": map[string]any{
 						"type": "string",
@@ -778,7 +778,9 @@ func isRetryableRouteError(err error) bool {
 		return false
 	}
 	switch routeErr.Code {
-	case "invalid_request", "invalid_query", "invalid_since", "invalid_host", "invalid_owner", "invalid_resource",
+	case "invalid_request", "invalid_query", "invalid_since", "invalid_until", "missing_since",
+		"invalid_limit", "invalid_match", "invalid_severity", "invalid_state",
+		"invalid_host", "invalid_owner", "invalid_resource",
 		"missing_host", "missing_resource", "unknown_intent":
 		return true
 	default:
