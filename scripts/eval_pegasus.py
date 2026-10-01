@@ -79,24 +79,40 @@ def states_value(text, expected, rel=0.0, abs_tol=0.0):
     return False
 
 
-def states_labeled(text, expected, labels, rivals=(), window=60):
-    """Whether `expected` appears with one of `labels` as its nearest label.
+def states_labeled(text, expected, labels, rivals=()):
+    """Whether `expected` is stated as one of `labels` and not as a rival.
 
-    Catches swapped figures: "24,963 failed and 2,053 completed" states both
-    true numbers and passes a presence check, but here 2,053's nearest label
-    is "completed", a rival, so it fails.
+    Catches swapped figures, which a presence check passes: "24,963 failed and
+    2,053 completed" contains both true numbers. Each figure is paired with the
+    label in its own clause: first the words after it, up to the next number or
+    the end of the line ("2,300 jobs failed"); failing that, the words before it
+    ("Failed: 2,300"). Character distance cannot do this -- in "31,603 jobs
+    completed and 2,300 jobs failed", "completed" sits nearer to 2,300 than
+    "failed" does.
     """
     want = float(expected)
     numbers, flat = _numbers(text)
-    spots = [(m.start(), m.end(), label in labels)
-             for label in tuple(labels) + tuple(rivals)
-             for m in re.finditer(re.escape(label), flat)]
-    for value, start, end in numbers:
+
+    def first_label(segment, last=False):
+        hits = [(m.start(), label in labels)
+                for label in tuple(labels) + tuple(rivals)
+                for m in re.finditer(r"\b" + re.escape(label), segment)]
+        if not hits:
+            return None
+        return (max(hits) if last else min(hits))[1]
+
+    for i, (value, start, end) in enumerate(numbers):
         if value != want:
             continue
-        near = [(max(ls - end, start - le, 0), ours) for ls, le, ours in spots]
-        near = [n for n in near if n[0] <= window]
-        if near and min(near)[1]:
+        line_start = flat.rfind("\n", 0, start) + 1
+        line_end = flat.find("\n", end)
+        line_end = len(flat) if line_end < 0 else line_end
+        prev_end = numbers[i - 1][2] if i > 0 else 0
+        next_start = numbers[i + 1][1] if i + 1 < len(numbers) else len(flat)
+        after = first_label(flat[end:min(line_end, next_start)])
+        if after is None:
+            after = first_label(flat[max(line_start, prev_end):start], last=True)
+        if after:
             return True
     return False
 
@@ -121,6 +137,18 @@ def self_test():
         (states_labeled("24,963 failed and 2,053 completed.", 2053, ("fail",), ("complet",)), False),
         (states_labeled("2,053 completed and 24,963 failed.", 2053, ("fail",), ("complet",)), False),
         (states_labeled("2,053 jobs failed and 24,963 completed.", 2053, ("fail",), ("complet",)), True),
+        # The bullet-list answer from 2026-10-01 that the first version failed.
+        (states_labeled("Of the jobs submitted:\n- **Completed**: 31,603\n- **Failed**: 2,300",
+                        31603, ("complet",), ("fail",)), True),
+        (states_labeled("Of the jobs submitted:\n- **Completed**: 31,603\n- **Failed**: 2,300",
+                        2300, ("fail",), ("complet",)), True),
+        (states_labeled("| State | Jobs |\n| Completed | 2,300 |\n| Failed | 31,603 |",
+                        2300, ("fail",), ("complet",)), False),
+        # The sentence the distance-based version failed, from five real answers.
+        (states_labeled("31,603 jobs completed and 2,300 jobs failed.", 2300, ("fail",), ("complet",)), True),
+        (states_labeled("31,603 jobs completed and 2,300 jobs failed.", 31603, ("complet",), ("fail",)), True),
+        (states_labeled("| State | Jobs |\n| Completed | 31,603 |\n| Failed | 2,300 |",
+                        2300, ("fail",), ("complet",)), True),
     ]
     bad = [i for i, (got, want) in enumerate(checks) if got != want]
     if bad:
