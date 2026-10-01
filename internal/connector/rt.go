@@ -264,7 +264,16 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		}
 		evidence.Breakdown["tickets_by_owner"] = breakdown
 		if len(oldest) > 0 {
-			evidence.Earliest = map[string]map[string]EvidenceItem{"oldest_ticket_by_owner": oldest}
+			evidence.Earliest = map[string]map[string]EvidenceItem{"oldest_ticket_of_each_owner": oldest}
+			// In evidence rather than only in the prompt: with the rule alone,
+			// asked for "the 5 oldest open tickets", the model listed five
+			// owners' oldest and got four of five wrong -- one owner held all
+			// five. Prompt wording did not hold; a warning beside the data did
+			// for truncation.
+			evidence.Warnings = append(evidence.Warnings,
+				"earliest.oldest_ticket_of_each_owner holds one ticket per owner, so it is not the oldest "+
+					"tickets overall -- one owner can hold all of those; for \"the N oldest tickets\", ask "+
+					"again with an until bound, which returns the page oldest first")
 		}
 
 		accounted := 0

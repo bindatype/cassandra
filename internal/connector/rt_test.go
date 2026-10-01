@@ -697,12 +697,21 @@ func TestRTConnectorOldestTicketByOwnerComesFromRT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	oldest := evidence.Earliest["oldest_ticket_by_owner"]
+	oldest := evidence.Earliest["oldest_ticket_of_each_owner"]
 	if got := oldest["aklwong@gwu.edu"].ID; got != "2631" {
 		t.Errorf("oldest ticket for aklwong = %q, want 2631 from RT, not the oldest row on the page", got)
 	}
 	if got := oldest["Nobody"].ID; got != "118816" {
 		t.Errorf("oldest ticket for Nobody = %q, want 118816", got)
+	}
+	scoped := false
+	for _, warning := range evidence.Warnings {
+		if strings.Contains(warning, "not the oldest tickets overall") {
+			scoped = true
+		}
+	}
+	if !scoped {
+		t.Errorf("warnings = %v, want one saying the table is per owner, not the oldest overall", evidence.Warnings)
 	}
 	for _, order := range censusOrders {
 		if order != "Created ASC" {
