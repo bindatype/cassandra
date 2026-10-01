@@ -613,3 +613,46 @@ func TestDenialAfterEvidenceStillAnswers(t *testing.T) {
 		t.Errorf("model turns = %d; the refusal should have gone back as a tool result", turns)
 	}
 }
+
+func TestThinkingIsSentOnlyWhenAskedFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		thinking   bool
+		budget     int
+		wantKwargs bool
+		wantBudget bool
+	}{
+		{"off by default", false, 0, false, false},
+		{"on without a cap", true, 0, true, false},
+		{"on with a cap", true, 512, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				json.Unmarshal(body, &sent)
+				io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`)
+			}))
+			defer server.Close()
+
+			client, err := NewMindRouterClient(MindRouterConfig{
+				Endpoint: server.URL, APIKey: "k", Model: "m",
+				Thinking: tc.thinking, ThinkingBudget: tc.budget,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "q"}}, nil, ""); err != nil {
+				t.Fatal(err)
+			}
+			kwargs, hasKwargs := sent["chat_template_kwargs"].(map[string]any)
+			if hasKwargs != tc.wantKwargs || (hasKwargs && kwargs["enable_thinking"] != true) {
+				t.Errorf("chat_template_kwargs = %v, want enable_thinking sent: %v", sent["chat_template_kwargs"], tc.wantKwargs)
+			}
+			if _, hasBudget := sent["thinking_token_budget"]; hasBudget != tc.wantBudget {
+				t.Errorf("thinking_token_budget present = %v, want %v", hasBudget, tc.wantBudget)
+			}
+		})
+	}
+}

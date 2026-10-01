@@ -35,6 +35,11 @@ type MindRouterConfig struct {
 	Model            string
 	Timeout          time.Duration
 	MaxResponseBytes int64
+	// Thinking asks the chat template for a reasoning phase (Gemma 4 reads
+	// enable_thinking). ThinkingBudget caps it; vLLM enforces the cap, but
+	// MindRouter dropped the field when measured on 2026-10-01.
+	Thinking       bool
+	ThinkingBudget int
 }
 
 // MindRouterClient speaks the OpenAI-compatible chat completions surface.
@@ -43,6 +48,8 @@ type MindRouterClient struct {
 	apiKey           string
 	model            string
 	maxResponseBytes int64
+	thinking         bool
+	thinkingBudget   int
 	client           *http.Client
 }
 
@@ -79,6 +86,8 @@ func NewMindRouterClient(config MindRouterConfig) (*MindRouterClient, error) {
 		apiKey:           config.APIKey,
 		model:            config.Model,
 		maxResponseBytes: maxBytes,
+		thinking:         config.Thinking,
+		thinkingBudget:   config.ThinkingBudget,
 		client:           &http.Client{Timeout: timeout},
 	}, nil
 }
@@ -133,6 +142,12 @@ func (c *MindRouterClient) Complete(ctx context.Context, messages []Message, too
 	body := map[string]any{
 		"model":    c.model,
 		"messages": messages,
+	}
+	if c.thinking {
+		body["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
+		if c.thinkingBudget > 0 {
+			body["thinking_token_budget"] = c.thinkingBudget
+		}
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools

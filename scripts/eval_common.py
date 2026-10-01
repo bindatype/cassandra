@@ -263,11 +263,21 @@ def proposed_args(trace):
     return args
 
 
+def thinking_label():
+    """How CASS_THINKING was set for this run, so reports cannot be mixed up."""
+    on = env_value("CASS_THINKING").strip().lower() in ("1", "on", "true", "yes")
+    budget = env_value("CASS_THINKING_BUDGET").strip()
+    if not on:
+        return "off"
+    return "on, budget %s tokens" % budget if budget and budget != "0" else "on, no budget"
+
+
 def write_report(name, title, lines):
     os.makedirs(RUNTIME, exist_ok=True)
     path = os.path.join(RUNTIME, name)
     with open(path, "w") as fh:
         fh.write("# %s\n\n" % title)
+        fh.write("Thinking: %s\n\n" % thinking_label())
         fh.write("\n".join(lines) + "\n")
     print("\nreport written to %s" % path)
     return path

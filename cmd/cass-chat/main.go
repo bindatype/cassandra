@@ -20,6 +20,8 @@ const (
 	mindrouterEndpointEnv = "CASS_MINDROUTER_ENDPOINT"
 	mindrouterKeyEnv      = "MINDROUTER_API_KEY"
 	mindrouterModelEnv    = "CASS_MODEL"
+	thinkingEnv           = "CASS_THINKING"
+	thinkingBudgetEnv     = "CASS_THINKING_BUDGET"
 	zabbixEndpointEnv     = "CASS_ZABBIX_ENDPOINT"
 	zabbixTokenEnv        = "ZABBIX_RO_TOKEN"
 	wazuhEndpointEnv      = "CASS_WAZUH_ENDPOINT"
@@ -198,10 +200,16 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 	if apiKey == "" {
 		return nil, fmt.Errorf("%s is not set (a value in ~/.bashrc must also be exported)", mindrouterKeyEnv)
 	}
+	thinking, thinkingBudget, err := thinkingSettings()
+	if err != nil {
+		return nil, err
+	}
 	client, err := orchestrator.NewMindRouterClient(orchestrator.MindRouterConfig{
-		Endpoint: endpoint,
-		APIKey:   apiKey,
-		Model:    model,
+		Endpoint:       endpoint,
+		APIKey:         apiKey,
+		Model:          model,
+		Thinking:       thinking,
+		ThinkingBudget: thinkingBudget,
 	})
 	if err != nil {
 		return nil, err
@@ -424,3 +432,28 @@ documentation rather than refusing:
 
 Flags:
 `
+
+// thinkingSettings reads CASS_THINKING (on/off) and CASS_THINKING_BUDGET
+// (reasoning tokens, 0 for no cap). Thinking is off unless asked for.
+func thinkingSettings() (bool, int, error) {
+	var on bool
+	switch strings.ToLower(strings.TrimSpace(env.Get(thinkingEnv))) {
+	case "", "0", "off", "false", "no":
+	case "1", "on", "true", "yes":
+		on = true
+	default:
+		return false, 0, fmt.Errorf("%s must be on or off, got %q", thinkingEnv, env.Get(thinkingEnv))
+	}
+	value := strings.TrimSpace(env.Get(thinkingBudgetEnv))
+	if value == "" {
+		return on, 0, nil
+	}
+	budget, err := strconv.Atoi(value)
+	if err != nil || budget < 0 {
+		return false, 0, fmt.Errorf("%s must be a non-negative number of tokens, got %q", thinkingBudgetEnv, value)
+	}
+	if budget > 0 && !on {
+		return false, 0, fmt.Errorf("%s is set but %s is not on", thinkingBudgetEnv, thinkingEnv)
+	}
+	return on, budget, nil
+}
