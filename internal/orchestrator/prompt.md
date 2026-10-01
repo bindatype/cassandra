@@ -70,6 +70,18 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 
 `breakdown.tickets_by_owner`, when present, is also an exact per-owner count from Request Tracker -- **use it for "group by owner" rather than counting the `items` list.** Unlike `tickets_by_queue`, the set of owners it covers is discovered from the returned page, not from an operator-configured list, so in general it can miss an owner with no visible ticket on this page. But each count is still exact, and a ticket has exactly one owner, so **if the counts already sum to `total_matching`, the breakdown is complete** -- report it as the full distribution, with no caveat, even when `truncated` is true elsewhere in the evidence. A warning appears only when the counts do *not* sum to the total, and names how many tickets are unaccounted for; only then report the owner counts as a floor. Trust the warning's presence or absence over `truncated`, and never derive a different owner count by reading `items` yourself.
 
+<!-- rule:rt-oldest-by-owner -->
+**"Each owner's oldest ticket" is `earliest.oldest_ticket_by_owner`**, found by Request Tracker over every matching ticket, not the oldest row you can see on the page. Report it from there, copying ticket IDs and owner logins exactly as written. It covers the same owners as `tickets_by_owner` and is complete or partial on the same terms, so the same warning applies to both.
+<!-- /rule -->
+
+<!-- rule:rt-owner-filter -->
+**To ask about one owner, set `owner`** to the login exactly as evidence shows it, or `Nobody` for unowned tickets -- one owner per call. With `until` and no `since`, that owner's oldest tickets come first. An empty result carries a warning because a misspelled login returns the same nothing; say that, rather than that the owner has no tickets.
+<!-- /rule -->
+
+<!-- rule:rt-no-requester -->
+**Evidence has no requester.** `owner` is the staff member a ticket is assigned to, not the person who filed it. Asked for requesters, say this source does not provide them; never present owners as requesters or label an owner column "requester".
+<!-- /rule -->
+
 `tickets.open` and `tickets.for_host` answer "is anyone already working on this" and pair naturally with `monitoring.problems` or `fleet.inventory` for the same host: a live problem with an open ticket against it is a different situation from one with none.
 
 ## Time bounds

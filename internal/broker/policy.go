@@ -101,6 +101,24 @@ func validateResourceName(name string) error {
 	return nil
 }
 
+// RT logins here are email addresses, which can run to the full 254.
+const maxOwnerSelectorLen = 254
+
+func validateOwnerSelector(owner string) error {
+	if owner == "" || len(owner) > maxOwnerSelectorLen || strings.TrimSpace(owner) != owner {
+		return fmt.Errorf("owner must be one RT login of 1-%d characters with no spaces", maxOwnerSelectorLen)
+	}
+	for _, char := range owner {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || strings.ContainsRune(".-_@+", char) {
+			continue
+		}
+		return fmt.Errorf("owner contains an unsupported character; it accepts only letters, digits, " +
+			"'.', '-', '_', '@', and '+', and exactly one RT login per call -- to ask about several " +
+			"owners, call this once per owner rather than combining them")
+	}
+	return nil
+}
+
 func validateHostSelector(host string) error {
 	if host == "" || len(host) > maxHostSelectorLen || strings.TrimSpace(host) != host {
 		return fmt.Errorf("host must contain 1-%d non-whitespace characters", maxHostSelectorLen)

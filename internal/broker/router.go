@@ -83,6 +83,18 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		}
 	}
 
+	if request.Owner != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if err := validateOwnerSelector(request.Owner); err != nil {
+				return RoutePlan{}, newRouteError("invalid_owner", err.Error())
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept owner; it applies to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
 	switch request.Intent {
 	case IntentFleetInventory:
 		if request.Host != "" || request.Resource != "" {
@@ -242,6 +254,7 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Limit:  ticketSearchLimit,
 			Since:  sinceValue,
 			Until:  untilValue,
+			Owner:  request.Owner,
 		}), nil
 
 	case IntentTicketsByHost:
@@ -255,6 +268,7 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Limit:  ticketSearchLimit,
 			Since:  sinceValue,
 			Until:  untilValue,
+			Owner:  request.Owner,
 		}), nil
 
 	default:
@@ -421,10 +435,10 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		return requests
 
 	case IntentTicketsOpen:
-		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until}}
+		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner}}
 
 	case IntentTicketsByHost:
-		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until}}
+		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner}}
 
 	default:
 		return nil

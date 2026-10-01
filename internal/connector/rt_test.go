@@ -659,3 +659,117 @@ func TestSearchSendsRTsOwnOrderingSyntax(t *testing.T) {
 		t.Errorf("order = %q, want ASC as a separate parameter", got.Get("order"))
 	}
 }
+
+func TestRTConnectorOldestTicketByOwnerComesFromRT(t *testing.T) {
+	var censusOrders []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if r.URL.Query().Get("per_page") == "1" {
+			if strings.Contains(query, "Owner = ") {
+				censusOrders = append(censusOrders, r.URL.Query().Get("orderby")+" "+r.URL.Query().Get("order"))
+			}
+			switch {
+			case strings.Contains(query, "Owner = 'aklwong@gwu.edu'"):
+				// The oldest ticket is not on the returned page below.
+				w.Write([]byte(`{"total":29,"items":[{"id":"2631","Subject":"oldest","Status":"open","Queue":"Ops","Owner":"aklwong@gwu.edu","Created":"2022-02-18T10:00:00Z"}]}`))
+			case strings.Contains(query, "Owner = 'Nobody'"):
+				w.Write([]byte(`{"total":1,"items":[{"id":"118816","Subject":"unowned","Status":"new","Queue":"Ops","Owner":"Nobody","Created":"2026-09-19T13:21:20Z"}]}`))
+			default:
+				w.Write([]byte(`{"total":0,"items":[]}`))
+			}
+			return
+		}
+		w.Write([]byte(`{"total":30,"items":[
+			{"id":"104416","Subject":"page row","Status":"new","Queue":"Ops","Owner":"aklwong@gwu.edu","Created":"2025-10-02T10:00:00Z"},
+			{"id":"118816","Subject":"unowned","Status":"new","Queue":"Ops","Owner":"Nobody","Created":"2026-09-19T13:21:20Z"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	oldest := evidence.Earliest["oldest_ticket_by_owner"]
+	if got := oldest["aklwong@gwu.edu"].ID; got != "2631" {
+		t.Errorf("oldest ticket for aklwong = %q, want 2631 from RT, not the oldest row on the page", got)
+	}
+	if got := oldest["Nobody"].ID; got != "118816" {
+		t.Errorf("oldest ticket for Nobody = %q, want 118816", got)
+	}
+	for _, order := range censusOrders {
+		if order != "Created ASC" {
+			t.Errorf("per-owner census sorted %q, want Created ASC so its one row is the oldest", order)
+		}
+	}
+}
+
+func TestRTConnectorOwnerFilterNarrowsEverySearch(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		if r.URL.Query().Get("per_page") == "1" {
+			w.Write([]byte(`{"total":2,"items":[]}`))
+			return
+		}
+		w.Write([]byte(`{"total":2,"items":[
+			{"id":"2631","Subject":"a","Status":"open","Queue":"Ops","Owner":"aklwong@gwu.edu"},
+			{"id":"104416","Subject":"b","Status":"new","Queue":"Ops","Owner":"aklwong@gwu.edu"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  100,
+		Owner:  "aklwong@gwu.edu",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, query := range queries {
+		if !strings.Contains(query, "Owner = 'aklwong@gwu.edu'") {
+			t.Errorf("RT query %q is missing the owner filter; a count from it would cover every owner", query)
+		}
+	}
+	if evidence.Owner != "aklwong@gwu.edu" {
+		t.Errorf("evidence owner_filter = %q, want the applied owner recorded", evidence.Owner)
+	}
+	if _, ok := evidence.Breakdown["tickets_by_owner"]; ok {
+		t.Error("tickets_by_owner computed under an owner filter, where it only restates total_matching")
+	}
+}
+
+func TestRTConnectorOwnerFilterWithNoTicketsSaysWhy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  100,
+		Owner:  "uklwong@gwu.edu",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	found := false
+	for _, warning := range evidence.Warnings {
+		if strings.Contains(warning, "spelled differently") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want one saying an unknown login also returns nothing", evidence.Warnings)
+	}
+}

@@ -179,6 +179,12 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 							"agent.status, or live.evidence, which report current state and refuse a bound rather than " +
 							"ignore it. A question about what is wrong NOW takes no bound, whatever time it mentions.",
 					},
+					"owner": map[string]any{
+						"type": "string",
+						"description": "For tickets.open and tickets.for_host only: one Request Tracker owner login exactly " +
+							"as evidence shows it (an @gwu.edu address), or Nobody for unowned tickets. One owner per " +
+							"call. With until and no since, that owner's oldest tickets come first.",
+					},
 					"match": map[string]any{
 						"type": "string",
 						"description": "Narrow monitoring evidence to problems whose name contains this text, " +
@@ -772,7 +778,7 @@ func isRetryableRouteError(err error) bool {
 		return false
 	}
 	switch routeErr.Code {
-	case "invalid_request", "invalid_query", "invalid_since", "invalid_host", "invalid_resource",
+	case "invalid_request", "invalid_query", "invalid_since", "invalid_host", "invalid_owner", "invalid_resource",
 		"missing_host", "missing_resource", "unknown_intent":
 		return true
 	default:

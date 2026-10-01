@@ -704,3 +704,40 @@ func TestUnroutableOperationSaysSo(t *testing.T) {
 		t.Errorf("misleading error for an unroutable operation: %v", err)
 	}
 }
+
+func TestOwnerFilterIsOneLoginOnTicketIntentsOnly(t *testing.T) {
+	router := newTestRouter(t)
+	cases := []struct {
+		name     string
+		request  RouteRequest
+		wantCode string
+	}{
+		{"tickets.open with an owner", RouteRequest{Intent: IntentTicketsOpen, Owner: "aklwong@gwu.edu"}, ""},
+		{"unowned tickets", RouteRequest{Intent: IntentTicketsOpen, Owner: "Nobody"}, ""},
+		{"tickets.for_host with an owner", RouteRequest{Intent: IntentTicketsByHost, Host: "dss01", Owner: "jcreech@gwu.edu"}, ""},
+		{"not a ticket intent", RouteRequest{Intent: IntentFleetInventory, Owner: "aklwong@gwu.edu"}, "invalid_request"},
+		{"several owners in one call", RouteRequest{Intent: IntentTicketsOpen, Owner: "aklwong@gwu.edu, jcreech@gwu.edu"}, "invalid_owner"},
+		{"a quote", RouteRequest{Intent: IntentTicketsOpen, Owner: "x' OR Owner = 'y"}, "invalid_owner"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := router.Plan(tc.request)
+			if tc.wantCode == "" {
+				if err != nil {
+					t.Fatalf("Plan() error = %v", err)
+				}
+				if plan.Steps[0].Owner != tc.request.Owner {
+					t.Errorf("step owner = %q, want %q", plan.Steps[0].Owner, tc.request.Owner)
+				}
+				return
+			}
+			var routeErr *RouteError
+			if !errors.As(err, &routeErr) || routeErr.Code != tc.wantCode {
+				t.Fatalf("Plan() error = %v, want code %s", err, tc.wantCode)
+			}
+			if tc.wantCode == "invalid_owner" && !strings.Contains(routeErr.Message, "once per owner") {
+				t.Errorf("message %q does not tell the model how to fix it", routeErr.Message)
+			}
+		})
+	}
+}

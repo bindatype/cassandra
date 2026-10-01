@@ -171,7 +171,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		return Evidence{}, err
 	}
 
-	query := ticketSearchQuery(step.Host, "", since, until, c.queues)
+	query := ticketSearchQuery(step.Host, step.Owner, since, until, c.queues)
 	requestedAt := time.Now().UTC()
 	order := ticketOrder(since, until)
 	items, total, err := c.search(ctx, query, limit, order)
@@ -191,6 +191,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		Query:          query,
 		Since:          step.Since,
 		Until:          step.Until,
+		Owner:          step.Owner,
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -225,7 +226,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 			"tickets_by_queue was not computed: %d queues are configured, more than the %d this connector "+
 				"will fan a single search out across", len(c.queues), maxRTQueueCensus))
 	} else {
-		breakdown, err := c.queueCensus(ctx, step.Host, since, until)
+		breakdown, err := c.queueCensus(ctx, step.Host, step.Owner, since, until)
 		if err != nil {
 			return Evidence{}, err
 		}
@@ -241,9 +242,20 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 	// the same reasoning the Zabbix connector uses for its severity census:
 	// severities partition the result, so their sum needs no separate total
 	// call to be trusted as exact.
+	if step.Owner != "" && total == 0 {
+		// A misspelled login and an owner with nothing open both come back
+		// empty, and this token cannot look users up to tell them apart.
+		evidence.Warnings = append(evidence.Warnings, fmt.Sprintf(
+			"no open tickets owned by %q match this search in the allowlisted queues; an RT login that "+
+				"does not exist, or is spelled differently, returns this same empty result, so check the "+
+				"spelling against tickets_by_owner before reporting that this owner has none", step.Owner))
+	}
+
+	// With an owner filter every matching ticket has that one owner, so a
+	// per-owner breakdown would only restate total_matching.
 	owners, ownersCapped := ownersOnPage(items)
-	if len(owners) > 0 {
-		breakdown, err := c.ownerCensus(ctx, owners, step.Host, since, until)
+	if step.Owner == "" && len(owners) > 0 {
+		breakdown, oldest, err := c.ownerCensus(ctx, owners, step.Host, since, until)
 		if err != nil {
 			return Evidence{}, err
 		}
@@ -251,6 +263,9 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 			evidence.Breakdown = make(map[string]map[string]int, 1)
 		}
 		evidence.Breakdown["tickets_by_owner"] = breakdown
+		if len(oldest) > 0 {
+			evidence.Earliest = map[string]map[string]EvidenceItem{"oldest_ticket_by_owner": oldest}
+		}
 
 		accounted := 0
 		for _, count := range breakdown {
@@ -381,11 +396,11 @@ func (c *RTConnector) search(ctx context.Context, query string, limit int, order
 // say where the open work actually is rather than only how much of it there
 // is. It costs one extra round trip per queue, bounded by maxRTQueueCensus,
 // the same trade the Zabbix connector makes for its own per-host breakdown.
-func (c *RTConnector) queueCensus(ctx context.Context, host, since, until string) (map[string]int, error) {
+func (c *RTConnector) queueCensus(ctx context.Context, host, owner, since, until string) (map[string]int, error) {
 	counts := make(map[string]int, len(c.queues))
 	for _, queue := range c.queues {
 		values := url.Values{}
-		values.Set("query", ticketSearchQuery(host, "", since, until, []string{queue}))
+		values.Set("query", ticketSearchQuery(host, owner, since, until, []string{queue}))
 		values.Set("per_page", "1")
 
 		body, status, err := c.get(ctx, "/REST/2.0/tickets", values)
@@ -436,31 +451,41 @@ func ownersOnPage(items []EvidenceItem) (owners []string, capped bool) {
 // ownerCensus counts matching tickets per discovered owner, the same
 // exact-count-via-a-narrower-search technique queueCensus uses, applied to a
 // set this connector discovered rather than one an operator configured.
-func (c *RTConnector) ownerCensus(ctx context.Context, owners []string, host, since, until string) (map[string]int, error) {
+//
+// The one ticket each count request returns is sorted oldest first, so it is
+// that owner's oldest matching ticket: the per-owner extreme comes from RT at
+// no extra round trip instead of from a model reading a page.
+func (c *RTConnector) ownerCensus(ctx context.Context, owners []string, host, since, until string) (map[string]int, map[string]EvidenceItem, error) {
 	counts := make(map[string]int, len(owners))
+	oldest := make(map[string]EvidenceItem, len(owners))
 	for _, owner := range owners {
 		values := url.Values{}
 		values.Set("query", ticketSearchQuery(host, owner, since, until, c.queues))
+		values.Set("fields", rtSearchFields)
+		values.Set(rtQueueNameField, "Name")
 		values.Set("per_page", "1")
+		values.Set("orderby", "Created")
+		values.Set("order", "ASC")
 
 		body, status, err := c.get(ctx, "/REST/2.0/tickets", values)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if status != http.StatusOK {
-			return nil, rtStatusError(status, body)
+			return nil, nil, rtStatusError(status, body)
 		}
-		var envelope struct {
-			Total int `json:"total"`
-		}
+		var envelope rtSearchResponse
 		if err := json.Unmarshal(body, &envelope); err != nil {
-			return nil, newConnectorError("decode_response", err.Error())
+			return nil, nil, newConnectorError("decode_response", err.Error())
 		}
 		if envelope.Total > 0 {
 			counts[owner] = envelope.Total
+			if len(envelope.Items) > 0 {
+				oldest[owner] = normalizeTicket(envelope.Items[0])
+			}
 		}
 	}
-	return counts, nil
+	return counts, oldest, nil
 }
 
 // get performs the bounded HTTP round trip and returns the response body and

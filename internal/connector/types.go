@@ -46,6 +46,9 @@ type Evidence struct {
 	// and nothing in the evidence said the filter had not applied. The
 	// mechanism built to catch exactly this had a hole in the shape of the bug.
 	Host string `json:"host_filter,omitempty"`
+	// Owner is the ticket-owner filter the source applied, recorded for the
+	// same reason as Host.
+	Owner string `json:"owner_filter,omitempty"`
 	// Ordering records which end of the matching set the items came from, for
 	// the same reason Since is recorded. A truncated page is a sample, and a
 	// sample with an undeclared ordering reads as representative. Asked which
@@ -87,7 +90,12 @@ type Evidence struct {
 	// whole -- but the question was never about the rows. It was "which hosts,
 	// and how many each", and that is a table code can compute exactly.
 	Breakdown map[string]map[string]int `json:"breakdown,omitempty"`
-	Truncated bool                      `json:"truncated"`
+	// Earliest holds named tables of each group's earliest record over every
+	// matching row, found by the source. "Each owner's oldest ticket" read off
+	// a page is a question about the page, and retyping a hundred rows to find
+	// it is where a one-letter slip became a wrong owner on 2026-10-01.
+	Earliest  map[string]map[string]EvidenceItem `json:"earliest,omitempty"`
+	Truncated bool                               `json:"truncated"`
 	// Data carries a policy-approved endpoint-agent result whose shape depends
 	// on the fixed operation. Unlike the vendor connectors, the agent already
 	// returns bounded, normalized JSON; re-encoding it into synthetic rows

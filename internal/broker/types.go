@@ -109,6 +109,9 @@ type RouteRequest struct {
 	// narrower filter and the aggregates computed alongside it, not a bigger
 	// page.
 	Limit int `json:"limit,omitempty"`
+	// Owner narrows ticket evidence to one Request Tracker owner login, as it
+	// appears in evidence, or Nobody for unowned tickets. One owner per call.
+	Owner string `json:"owner,omitempty"`
 }
 
 type RoutePlan struct {
@@ -129,6 +132,7 @@ type RouteStep struct {
 	Match     string           `json:"match,omitempty"`
 	Severity  string           `json:"severity,omitempty"`
 	State     string           `json:"state,omitempty"`
+	Owner     string           `json:"owner,omitempty"`
 	Target    *OperationTarget `json:"target,omitempty"`
 	Params    *OperationParams `json:"params,omitempty"`
 }
