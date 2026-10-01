@@ -1,6 +1,6 @@
 ---
 name: zabbix-triage-report
-description: Zabbix alert triage: summary + detail report via Cassandra.
+description: "Zabbix alert triage: summary + detail report via Cassandra."
 version: 1.0.0
 author: Glen Maclachlan + Hermes Agent
 platforms: [linux]
