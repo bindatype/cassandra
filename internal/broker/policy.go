@@ -127,12 +127,8 @@ func validateHostSelector(host string) error {
 		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '.' || char == '-' || char == '_' {
 			continue
 		}
-		// The practical way this fires is a model asked about several hosts at
-		// once and wrote them as one comma- or "and"-joined string. Saying so
-		// directly, rather than leaving the model to guess and retry by
-		// bisecting the host list -- observed live, 2026-09-29: a four-host
-		// question cost six sequential calls before it worked out that each
-		// one wanted exactly one host.
+		// Usually a model joining several hosts into one string. Say "one host
+		// per call" outright, or it bisects the list by trial and error.
 		return fmt.Errorf("host contains an unsupported character; it accepts only letters, digits, " +
 			"'.', '-', and '_', and exactly one hostname per call -- to ask about several hosts, " +
 			"call this once per host rather than combining them")
@@ -143,19 +139,16 @@ func validateHostSelector(host string) error {
 // OperationTakesTarget reports whether a broker-routable operation addresses a
 // path.
 //
-// Every operation did, until host.info: it reports facts about the machine
-// rather than about a file, so there is nothing for a path to name. Keeping
-// that as one predicate rather than a condition repeated in three places is
-// deliberate -- validation, route construction and the connector each need to
-// know, and three copies of a list is how they come to disagree.
+// Machine-fact operations such as host.info do not. Validation, route
+// construction and the connector all use this one predicate, so they can't
+// disagree.
 func OperationTakesTarget(operation string) bool {
 	switch operation {
 	case "host.info", "host.uptime", "host.diskfree", "host.network",
 		"host.listeners", "kernel.messages", "host.gpu", "capabilities.describe":
-		// These report facts about the machine rather than about a file. The
-		// command-backed ones take no target for a second reason as well: every
-		// argument they pass is a compile-time constant, so there is no place
-		// for a caller-supplied value to land.
+		// Facts about the machine, not a file. The command-backed ones also
+		// pass only compile-time arguments, so a caller's value has nowhere to
+		// land.
 		return false
 	default:
 		return true
@@ -163,9 +156,7 @@ func OperationTakesTarget(operation string) bool {
 }
 
 func validateResource(resource Resource) error {
-	// The operation is checked before the path, because the path rules depend
-	// on it and because "path must be absolute" is a confusing complaint about
-	// an operation that is not routable at all.
+	// Operation before path: the path rules depend on it.
 	if !routableOperations[resource.Operation] {
 		return fmt.Errorf("operation %q is not broker-routable", resource.Operation)
 	}
@@ -178,8 +169,8 @@ func validateResource(resource Resource) error {
 			return fmt.Errorf("path must be canonical")
 		}
 	} else if resource.Path != "" {
-		// Rejected rather than ignored. A path that is silently discarded
-		// reads, to whoever wrote it, as a path that is being honoured.
+		// Rejected rather than ignored, so a discarded path doesn't read as
+		// honoured.
 		return fmt.Errorf("%s addresses no path; remove the path field", resource.Operation)
 	}
 
@@ -225,10 +216,9 @@ func validateResource(resource Resource) error {
 			return fmt.Errorf("host.info does not accept parameters")
 		}
 	case "host.uptime", "host.diskfree", "host.network", "host.listeners", "kernel.messages", "host.gpu":
-		// Command-backed operations take no parameters at all: every argument
-		// they pass is compiled in, which is the property that removes the
-		// injection class. A policy that tried to bound them would be
-		// describing a knob that does not exist.
+		// Command-backed operations take no parameters: every argument is
+		// compiled in, which removes the injection class. There is nothing to
+		// bound.
 		if params != (OperationParams{}) {
 			return fmt.Errorf("%s does not accept parameters", resource.Operation)
 		}

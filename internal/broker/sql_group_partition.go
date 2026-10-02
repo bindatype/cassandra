@@ -9,25 +9,14 @@ import (
 // conflictingGroupByPartitionColumn reports a column that appears in both a
 // top-level GROUP BY and a same-scope PARTITION BY.
 //
-// GROUP BY collapses to one row per group before any window function runs.
-// A query that also writes OVER (PARTITION BY <that same column>) is asking
-// PERCENTILE_CONT to rank a partition that, by the time the window function
-// sees it, holds exactly one row -- so it returns that row's own value for
-// every percentile requested, and P50 comes back equal to P95. That is what
-// a live askcass run produced for seven research groups on 2026-09-23, and
-// it reproduced identically with and without the percentile-cont-with-
-// group-by prompt rule: the model does not reliably self-check this, so it
-// is caught here instead.
+// GROUP BY collapses to one row per group before any window function runs,
+// so PARTITION BY the same column ranks a one-row partition: PERCENTILE_CONT
+// returns that row's own value, and P50 equals P95. The prompt rule against
+// it did not hold, so it is caught here.
 //
-// The correct rewrite computes the window function over the raw rows in a
-// subquery, then GROUP BYs the result outside. That rewrite also contains
-// both "PARTITION BY x" and "GROUP BY x" -- just in two different scopes --
-// so a check that only looks for both phrases anywhere in the text would
-// flag the fix along with the bug. The distinguishing fact is scope: a
-// PARTITION BY enclosed by any parenthesized span that itself contains a
-// SELECT is inside a subquery and is safe, no matter which column it names.
-// Only a PARTITION BY with no such enclosing subquery -- sitting at the same
-// level as the query's own GROUP BY -- can collapse to one row per group.
+// The fix (window over raw rows in a subquery, GROUP BY outside) names both
+// clauses too, in different scopes. So only a PARTITION BY not enclosed by a
+// parenthesized span containing a SELECT counts.
 func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 	groupBy := findKeyword(query, `group\s+by`)
 	partitionBy := findKeyword(query, `partition\s+by`)
@@ -126,15 +115,9 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		return "", false
 	}
 
-	// The collapse to one row per partition only happens if the GROUP BY key
-	// is held constant within that partition -- i.e. every column GROUP BY
-	// groups by is also named by that PARTITION BY. GROUP BY day, netid with
-	// PARTITION BY netid alone is not degenerate: within one netid-partition,
-	// there is still one row per distinct day, because day is part of the
-	// group key but not held constant by the partition. Only when the
-	// partition's columns are a superset of the group's -- commonly, the
-	// same single column on both sides -- can the partition it sees be down
-	// to one row.
+	// Degenerate only if the PARTITION BY columns include every GROUP BY
+	// column. GROUP BY day, netid with PARTITION BY netid still leaves one
+	// row per day in each partition.
 	for _, cols := range topLevelPartitionCols {
 		partitionSet := make(map[string]bool, len(cols))
 		for _, c := range cols {
@@ -207,11 +190,8 @@ done:
 		part = strings.TrimSpace(part)
 		part = strings.Trim(part, "`\"")
 		part = strings.ToLower(part)
-		// A GROUP BY / PARTITION BY item can be an expression, not just a bare
-		// column ("StartTime - SubmitTime"); only a bare identifier can ever
-		// match the other clause's bare identifier, so anything with a space
-		// or operator in it cannot conflict and is kept as-is for that reason
-		// rather than parsed further.
+		// An item may be an expression ("StartTime - SubmitTime"). Only bare
+		// identifiers are compared, so expressions are kept as-is.
 		if part != "" {
 			cols = append(cols, part)
 		}

@@ -5,16 +5,10 @@ import "strings"
 // conflictingUngroupedAggregateWindow reports whether one SELECT scope mixes a
 // plain aggregate with a window function without GROUP BY.
 //
-// In that shape the aggregate collapses the source rows to one row before the
-// window function runs. The window therefore sees one value, not the source
-// population. LIMIT 1 only hides the resulting single row; it does not repair
-// the calculation. This is how a live query returned a zero median while the
-// equivalent all-window query returned a non-zero value over the same 217 jobs.
-//
-// Query scopes matter. An outer COUNT/MAX over a subquery that computes a
-// percentile is the recommended repair and must remain valid, so this scanner
-// treats every SELECT independently and ignores nested SELECT scopes while
-// examining their parent.
+// The aggregate collapses the rows to one before the window runs, so the
+// window sees one value, not the population; LIMIT 1 hides that but doesn't
+// fix it. An outer aggregate over a percentile subquery is the repair and
+// stays valid: each SELECT scope is examined separately.
 func conflictingUngroupedAggregateWindow(query string) bool {
 	tokens, scopes := lexQueryStructure(query)
 	for i := range tokens {
