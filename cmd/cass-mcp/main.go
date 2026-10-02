@@ -142,7 +142,7 @@ func chatRunner(chat, policy string, wazuhInsecure bool, timeout time.Duration) 
 func withoutKey(environ []string) []string {
 	out := environ[:0:0]
 	for _, kv := range environ {
-		if !strings.HasPrefix(kv, "MINDROUTER_API_KEY=") && !strings.HasPrefix(kv, "SROIAAA_MINDROUTER_API_KEY=") {
+		if !strings.HasPrefix(kv, "MINDROUTER_API_KEY=") {
 			out = append(out, kv)
 		}
 	}

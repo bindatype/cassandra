@@ -138,7 +138,7 @@ func TestOnePersonCannotTakeEverySlot(t *testing.T) {
 }
 
 func TestTheServicesOwnKeyNeverReachesAQuestion(t *testing.T) {
-	env := []string{"PATH=/bin", "MINDROUTER_API_KEY=service-key", "SROIAAA_MINDROUTER_API_KEY=old-service-key", "CASS_ZABBIX_ENDPOINT=x"}
+	env := []string{"PATH=/bin", "MINDROUTER_API_KEY=service-key", "CASS_ZABBIX_ENDPOINT=x"}
 	for _, kv := range withoutKey(env) {
 		if strings.Contains(kv, "service-key") {
 			t.Errorf("%q survived; a question could run on the service's key instead of the caller's", kv)
