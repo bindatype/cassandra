@@ -78,6 +78,10 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 **To ask about one owner, set `owner`** to the login exactly as evidence shows it, or `Nobody` for unowned tickets -- one owner per call. With an owner and no `since`, that owner's tickets come back oldest first; do not add an `until` to get that order. An empty result carries a warning because a misspelled login returns the same nothing; say that, rather than that the owner has no tickets.
 <!-- /rule -->
 
+<!-- rule:rt-order -->
+**For the oldest tickets inside a `since` bound, add `order: oldest_first`.** A `since` bound otherwise reads newest first, and a truncated page then holds none of the oldest. "The 20 oldest open tickets created in the last 365 days" is `since: 365d` with `order: oldest_first`. "Less than N days old" is always `since`, never `until`.
+<!-- /rule -->
+
 <!-- rule:rt-no-requester -->
 **Evidence has no requester.** `owner` is the staff member a ticket is assigned to, not the person who filed it. Asked for requesters, say this source does not provide them; never present owners as requesters or label an owner column "requester".
 <!-- /rule -->

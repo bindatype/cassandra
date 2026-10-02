@@ -741,3 +741,22 @@ func TestOwnerFilterIsOneLoginOnTicketIntentsOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestTicketOrderIsAcceptedOnTicketIntentsOnly(t *testing.T) {
+	router := newTestRouter(t)
+	plan, err := router.Plan(RouteRequest{Intent: IntentTicketsOpen, Since: "365d", Order: TicketOrderOldestFirst})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Steps[0].Order != TicketOrderOldestFirst {
+		t.Errorf("step order = %q, want %q", plan.Steps[0].Order, TicketOrderOldestFirst)
+	}
+	for _, request := range []RouteRequest{
+		{Intent: IntentTicketsOpen, Order: "oldest"},
+		{Intent: IntentFleetInventory, Order: TicketOrderOldestFirst},
+	} {
+		if _, err := router.Plan(request); err == nil {
+			t.Errorf("Plan(%+v) accepted, want invalid_request", request)
+		}
+	}
+}

@@ -185,6 +185,14 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 							"as evidence shows it (an @gwu.edu address), or Nobody for unowned tickets. One owner per " +
 							"call. With an owner and no since, that owner's oldest tickets come first; add no until for that.",
 					},
+					"order": map[string]any{
+						"type": "string",
+						"enum": []string{broker.TicketOrderOldestFirst, broker.TicketOrderNewestFirst},
+						"description": "For tickets.open and tickets.for_host only: which end of the matching tickets " +
+							"a truncated page shows. Omit it and the bound decides (until: oldest first; since: newest " +
+							"first). Set oldest_first for \"the oldest tickets created in the last N days\": since: Nd " +
+							"with order: oldest_first.",
+					},
 					"match": map[string]any{
 						"type": "string",
 						"description": "Narrow monitoring evidence to problems whose name contains this text, " +
@@ -687,6 +695,14 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		// Another attempt helps only if something else is reachable. When this
 		// session can reach nothing, retrying spends turns to rediscover that.
 		return connector.Result{}, &callFailure{err: err, recoverable: len(s.intents) > 0}
+	}
+
+	if err := ticketBoundContradiction(s.event.Question, request); err != nil {
+		s.record("bound_contradicts_question", err.Error(), false)
+		if s.event.Decision == "no_tool_call" {
+			s.event.Decision = "denied"
+		}
+		return connector.Result{}, &callFailure{err: err, recoverable: true}
 	}
 
 	plan, err := s.router.Plan(request)

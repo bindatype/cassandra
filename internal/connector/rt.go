@@ -173,7 +173,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 
 	query := ticketSearchQuery(step.Host, step.Owner, since, until, c.queues)
 	requestedAt := time.Now().UTC()
-	order := ticketOrder(since, until, step.Owner)
+	order := ticketOrder(since, until, step.Owner, step.Order)
 	items, total, err := c.search(ctx, query, limit, order)
 	if err != nil {
 		return Evidence{}, err
@@ -354,7 +354,13 @@ func rtDateBound(value string, loc *time.Location) (string, error) {
 // One owner with no `since` is also oldest first: "what is X's oldest ticket"
 // otherwise pushed the model to invent an `until` purely to flip the order,
 // and its "10y" and "3650d" were refused and ended the session.
-func ticketOrder(since, until, owner string) string {
+func ticketOrder(since, until, owner, explicit string) string {
+	switch explicit {
+	case broker.TicketOrderOldestFirst:
+		return "ASC"
+	case broker.TicketOrderNewestFirst:
+		return "DESC"
+	}
 	if since == "" && owner != "" {
 		return "ASC"
 	}

@@ -112,7 +112,18 @@ type RouteRequest struct {
 	// Owner narrows ticket evidence to one Request Tracker owner login, as it
 	// appears in evidence, or Nobody for unowned tickets. One owner per call.
 	Owner string `json:"owner,omitempty"`
+	// Order picks which end of a truncated ticket page to read: oldest_first or
+	// newest_first. Without it the bound decides, and a since bound always read
+	// newest first, so "the oldest tickets created in the last year" had no
+	// request that could reach them.
+	Order string `json:"order,omitempty"`
 }
+
+// Ticket page orderings a request may ask for explicitly.
+const (
+	TicketOrderOldestFirst = "oldest_first"
+	TicketOrderNewestFirst = "newest_first"
+)
 
 type RoutePlan struct {
 	Version int         `json:"version"`
@@ -133,6 +144,7 @@ type RouteStep struct {
 	Severity  string           `json:"severity,omitempty"`
 	State     string           `json:"state,omitempty"`
 	Owner     string           `json:"owner,omitempty"`
+	Order     string           `json:"order,omitempty"`
 	Target    *OperationTarget `json:"target,omitempty"`
 	Params    *OperationParams `json:"params,omitempty"`
 }

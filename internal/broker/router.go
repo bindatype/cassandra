@@ -83,6 +83,19 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		}
 	}
 
+	if request.Order != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if request.Order != TicketOrderOldestFirst && request.Order != TicketOrderNewestFirst {
+				return RoutePlan{}, newRouteError("invalid_request",
+					fmt.Sprintf("order must be %s or %s", TicketOrderOldestFirst, TicketOrderNewestFirst))
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept order; it applies to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
 	if request.Owner != "" {
 		switch request.Intent {
 		case IntentTicketsOpen, IntentTicketsByHost:
@@ -255,6 +268,7 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Since:  sinceValue,
 			Until:  untilValue,
 			Owner:  request.Owner,
+			Order:  request.Order,
 		}), nil
 
 	case IntentTicketsByHost:
@@ -269,6 +283,7 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Since:  sinceValue,
 			Until:  untilValue,
 			Owner:  request.Owner,
+			Order:  request.Order,
 		}), nil
 
 	default:
@@ -435,10 +450,10 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		return requests
 
 	case IntentTicketsOpen:
-		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner}}
+		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner, Order: plan.Steps[0].Order}}
 
 	case IntentTicketsByHost:
-		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner}}
+		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner, Order: plan.Steps[0].Order}}
 
 	default:
 		return nil
