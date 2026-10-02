@@ -27,22 +27,12 @@ const (
 	// the manager's own summary endpoint does not. Excluding it from aggregate
 	// counts keeps our numbers equal to what the Wazuh dashboard reports.
 	managerAgentID = "000"
-	// fleetItemCap bounds how many agent records travel back to the model. The
-	// summary already carries exact counts for the whole fleet, so the items
-	// exist to be named, not to be tallied.
-	//
-	// 200 is chosen against the orchestrator's evidence tripwire, which rejects
-	// an oversized result *whole* rather than trimming it: a normalized record
-	// with an IPv6 address and two group memberships measures ~219 bytes, so
-	// 200 records is ~44 KB against a 64 KB tripwire, leaving room for a second
-	// source in the same turn. 300 would be ~66 KB -- over, and the answer
-	// would arrive with no fleet evidence at all rather than partial evidence.
-	//
-	// Counting questions should not come here in the first place: groups.list
-	// returns Wazuh's own per-group totals in ten rows. See IntentFleetGroups.
-	//
-	// Items are ordered before the cap applies, so what survives is what a
-	// reader would ask about first.
+	// fleetItemCap bounds the agent records returned; the summary carries the
+	// exact counts, so items are there to be named, not tallied. A record is
+	// ~219 bytes, so 200 is ~44 KB, under the orchestrator's 64 KB evidence
+	// cap with room for a second source. Items are ordered before the cap, so
+	// the ones a reader asks about first survive. Counting questions belong
+	// to groups.list (IntentFleetGroups).
 	fleetItemCap = 200
 )
 
@@ -62,20 +52,13 @@ type WazuhConfig struct {
 	Password         string
 	Timeout          time.Duration
 	MaxResponseBytes int64
-	// InsecureSkipVerify disables TLS verification. The RTS deployment presents
-	// a self-signed certificate, so this is required in practice there, but it
-	// is never the default: an operator must opt in deliberately.
+	// InsecureSkipVerify disables TLS verification. The RTS manager's API
+	// certificate does not verify for the name Cassandra uses, so this is
+	// needed there today, but it is never the default.
 	InsecureSkipVerify bool
-	// CriticalGroups names the agent groups whose loss is worth escalating, and
-	// is site configuration rather than a property of Wazuh: at RTS these are
-	// RTS_Ops and Viper. When set, the evidence summary carries a count of
-	// agents that are both disconnected and in one of these groups.
-	//
-	// The count is computed here rather than left to a model, for the same
-	// reason every other aggregate is. Deciding which of several hundred agents
-	// are both down and in a named group is arithmetic over a list, and a model
-	// asked to do that gets it wrong occasionally and states the wrong number
-	// with confidence.
+	// CriticalGroups names the agent groups whose loss is worth escalating
+	// (site configuration; at RTS, RTS_Ops and Viper). The summary counts
+	// agents that are both disconnected and in one of them, in code.
 	CriticalGroups []string
 }
 
@@ -228,9 +211,8 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 }
 
 // executeGroups answers a group-census question from Wazuh's own per-group
-// totals instead of returning agent records for the model to tally. Ten rows
-// replace two hundred and seventy-six, and the counts are computed by the
-// source rather than by a reader counting a page that may be capped.
+// totals: about ten rows instead of every agent record, counted by the source
+// rather than by a model reading a page that may be capped.
 func (c *WazuhConnector) executeGroups(ctx context.Context, step broker.RouteStep) (Evidence, error) {
 	if step.Since != "" || step.Until != "" {
 		// Group membership is current state. A time bound here would filter
@@ -525,26 +507,13 @@ func itemRank(item EvidenceItem) int {
 	}
 }
 
-// summarizeAgents counts agents by connection state, and separately counts the
-// ones whose loss is worth escalating. The Wazuh manager's own record is
-// excluded so these totals match the manager's summary endpoint and the Wazuh
-// dashboard.
-//
-// disconnected_critical is computed here for the same reason every aggregate
-// is: intersecting a status with membership of a named group, across several
-// hundred agents, is arithmetic over a list. A model asked to do it will
-// usually be right and occasionally be confidently wrong, and "which critical
-// machines are down" is not a number to be occasionally wrong about.
+// summarizeAgents counts agents by connection state, and separately the
+// disconnected ones in critical groups. The manager's own record is excluded
+// so the totals match the Wazuh dashboard.
 func summarizeAgents(agents []wazuhAgent, critical map[string]struct{}) map[string]int {
-	// Always stated, never inferred from a missing key. Omitting these when no
-	// groups were configured let a model read the absence as zero: asked which
-	// critical agents were down, it answered "no critical agents were
-	// identified as disconnected, as the critical_disconnected count was absent
-	// from the evidence summary" -- an all-clear posted to a channel, derived
-	// from configuration that was simply not loaded.
-	//
-	// critical_groups_configured distinguishes "checked, none affected" from
-	// "never checked". When it is zero the question was not answered at all.
+	// Always present: a missing key was once read as zero and produced a
+	// false all-clear. critical_groups_configured = 0 means "never checked",
+	// not "none affected".
 	summary := map[string]int{
 		"total":                      0,
 		"critical_groups_configured": len(critical),

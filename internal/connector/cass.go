@@ -283,21 +283,13 @@ func (c *CassConnector) Execute(ctx context.Context, step broker.RouteStep) (Evi
 	}, nil
 }
 
-// summarizeAgentData computes, in code, the counts a model is forbidden to
-// tally for itself.
+// summarizeAgentData computes, in code, the counts the prompt forbids the
+// model to tally, as every other connector does in Summary. Agent evidence
+// arrives in Data rather than Items, so without this the model would get a
+// raw array and a rule telling it not to count arrays.
 //
-// Every other connector places population figures in Summary because a model
-// asked to count several hundred records will sometimes get it wrong and state
-// the wrong number with confidence: one asked to tally 275 rows answered 55
-// against a true 52, and asked for a total reported the page limit of 25
-// against a true 1841. Endpoint evidence arrives as the agent's own JSON in
-// Data rather than as Items, which is the right shape for a file read or a
-// directory listing, but it arrived without those figures -- leaving the model
-// a raw array and a prompt rule telling it not to count arrays.
-//
-// Where the agent reports a figure of its own, it is checked rather than
-// copied. A disagreement is a defect in the answer and is warned about, not
-// quietly resolved in either direction.
+// A figure the agent reports itself is checked, not copied; a disagreement is
+// warned about rather than resolved either way.
 func summarizeAgentData(operation string, data any) (map[string]int, int, []string) {
 	object, ok := data.(map[string]any)
 	if !ok {
@@ -403,21 +395,14 @@ func agentResponseError(status int, response agentOperationResponse) error {
 // sameHost reports whether an agent's self-reported hostname is the host the
 // plan addressed.
 //
-// This exists because nothing else ties a response to its origin. The endpoint
-// for a host is operator configuration -- a URL and a port -- and with more
-// than one agent, and especially with SSH tunnels where several agents are
-// reached through several local ports, a transposed port produces one host's
-// filesystem returned under another host's name. That is a wrong answer in
-// the shape of a correct one: it parses, it reads sensibly, and nothing in it
-// is true of the host asked about.
+// Nothing else ties a response to its origin: with several agents behind SSH
+// tunnels on local ports, a transposed port returns one host's data under
+// another's name.
 //
-// The comparison is on the first label, lowercased. A policy naming
-// winston.arc.gwu.edu and an agent reporting winston are the same machine, and
-// requiring the agent's /etc/hostname to be fully qualified would make this
-// check fail on correct configurations -- which is how checks get removed.
-// The cost is that two hosts sharing a short name in different domains would
-// compare equal. This estate has one domain; a deployment with more should
-// tighten this to an exact match and say so in the policy.
+// Only the first label is compared, lowercased, so winston.arc.gwu.edu
+// matches an agent reporting "winston". Requiring a fully qualified
+// /etc/hostname would fail correct configurations. Two hosts with the same
+// short name in different domains would match; this estate has one domain.
 func sameHost(planned, reported string) bool {
 	return shortHost(planned) == shortHost(reported)
 }
