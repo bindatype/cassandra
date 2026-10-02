@@ -32,16 +32,11 @@ const (
 	// endpoint and bearer token approved for that policy host; plans never
 	// carry either value.
 	cassAgentConfigEnv = "CASS_AGENT_CONFIG"
-	// rtQueuesEnv names the RT queues this deployment allows searching, as a
-	// comma-separated list. Site configuration, so it lives here rather than
-	// in the connector: RT queues are organization-specific and there is no
-	// safe default that includes any of them.
+	// rtQueuesEnv names the RT queues this deployment may search,
+	// comma-separated. There is no safe default.
 	rtQueuesEnv = "CASS_RT_QUEUES"
 	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated.
-	// cass-chat has always read it; this path did not, so the same plan
-	// against the same environment produced evidence that could not say
-	// whether a critical agent was affected. Two paths the README calls
-	// equivalent must read the same configuration.
+	// cass-chat reads it too; both paths must read the same configuration.
 	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
 )
 
@@ -61,10 +56,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	// Said once, after the flags have pulled their defaults from the
-	// environment, so a run that still depends on the old variable names says
-	// so out loud. This is what makes the compatibility temporary rather than
-	// permanent: silence here is how a shim outlives the rename.
+	// After the flags have read their defaults, warn once if any came from
+	// legacy SROIAAA_* names, so the shim doesn't outlive the rename.
 	env.ReportLegacy(stderr)
 
 	if *policyPath == "" {
@@ -78,9 +71,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// A plan is an ordinary JSON document and arrives here from an untrusted
-	// caller. Authorization happened when the planner ran; it is re-established
-	// here rather than assumed, so that a hand-written plan cannot execute.
+	// A plan is an ordinary JSON document from an untrusted caller, so
+	// authorization is re-established here, not assumed.
 	if err := verifyPlan(*policyPath, plan); err != nil {
 		fmt.Fprintf(stderr, "cass-broker-exec: %v\n", err)
 		return 1
@@ -246,9 +238,8 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		if token == "" {
 			return nil, fmt.Errorf("plan needs RT: %s is not set (note that a value in ~/.bashrc must also be exported)", rtTokenEnv)
 		}
-		// The connector refuses an empty allowlist, correctly and fail-closed,
-		// but it is a library and cannot name the variable that would fix it.
-		// The caller knows; say it here.
+		// The connector refuses an empty queue allowlist but can't name the
+		// variable that fixes it; this can.
 		queues := splitList(env.Get(rtQueuesEnv))
 		if len(queues) == 0 {
 			return nil, fmt.Errorf("plan needs RT: %s is not set (and must be exported); "+
@@ -287,9 +278,7 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 	return built, nil
 }
 
-// splitList parses a comma-separated environment value, discarding blanks so
-// a trailing comma or a stray space does not become a queue name that
-// matches nothing.
+// splitList parses a comma-separated environment value, discarding blanks.
 func splitList(value string) []string {
 	var out []string
 	for _, part := range strings.Split(value, ",") {
@@ -315,8 +304,7 @@ func pegasusMaxRows() int {
 }
 
 // pegasusMaxBytes reads the evidence byte-cap override, falling back to the
-// connector default when unset. Raise it only alongside a model whose context
-// window can hold the result.
+// connector default when unset.
 func pegasusMaxBytes() int {
 	value := env.Get(pegasusMaxBytesEnv)
 	if value == "" {
@@ -332,11 +320,8 @@ func pegasusMaxBytes() int {
 // pegasusTimeout reads the query time bound, falling back to the connector
 // default when unset.
 //
-// One value, because it governs three things that previously disagreed: how
-// long the driver waits on a socket, how long the connector waits overall, and
-// what max_statement_time the server is told to enforce. Setting them
-// separately is how the server-side limit came to sit at twice the client's
-// and could never fire first.
+// One value sets the socket, connector and server statement limits, so the
+// server-side limit fires first (see NewPegasusConnector).
 func pegasusTimeout() time.Duration {
 	value := env.Get(pegasusTimeoutEnv)
 	if value == "" {

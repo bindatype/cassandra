@@ -24,10 +24,9 @@ type ResponseMeta struct {
 	Truncated  bool   `json:"truncated"`
 	Agent      string `json:"agent"`
 	Version    string `json:"version"`
-	// Host is the agent's own hostname, on every response rather than only on
-	// capabilities.describe. It is what lets a caller prove the answer came
-	// from the host it addressed, and a check that only ran on the first call
-	// would not survive a tunnel being repointed afterwards.
+	// Host is the agent's own hostname, on every response, so a caller can
+	// check each answer came from the host it addressed (a tunnel can be
+	// repointed between calls).
 	Host    string         `json:"host"`
 	Details map[string]any `json:"details,omitempty"`
 }

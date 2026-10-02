@@ -53,10 +53,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	// Said once, after the flags have pulled their defaults from the
-	// environment, so a run that still depends on the old variable names says
-	// so out loud. This is what makes the compatibility temporary rather than
-	// permanent: silence here is how a shim outlives the rename.
+	// After the flags have read their defaults, warn once if any came from
+	// legacy SROIAAA_* names, so the shim doesn't outlive the rename.
 	env.ReportLegacy(stderr)
 
 	if *probe {

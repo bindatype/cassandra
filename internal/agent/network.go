@@ -12,23 +12,14 @@ import (
 	"strings"
 )
 
-// host.network used to run `ip addr show` and `ip route show`. It cannot.
-//
-// /usr/sbin/ip is labelled ifconfig_exec_t, so executing it triggers an SELinux
-// domain transition to ifconfig_t. DynamicUser=yes implies NoNewPrivileges=yes,
-// and NNP forbids a domain transition that is not bounded, so the exec is
-// denied with nnp_transition and the service exits 203 before `ip` runs at all.
-// Measured on sgtstubby 2026-09-18, under enforcing:
+// host.network reads interfaces through Go's net package (netlink, in
+// process) and routes from /proc/net, rather than running `ip`. Under SELinux
+// enforcing, exec of /usr/sbin/ip needs a domain transition to ifconfig_t,
+// which NoNewPrivileges (implied by DynamicUser=yes) forbids:
 //
 //	avc: denied { nnp_transition } scontext=init_t tcontext=ifconfig_t
 //
-// It passed every test because the tests ran the agent as an ordinary user
-// rather than as a hardened unit, which is the one difference that decided it.
-//
-// Go's net package speaks netlink from inside this process. No child, no
-// transition, no NNP problem -- and the same data. Routes come from /proc/net,
-// which are ordinary readable files. The result is both correct under enforcing
-// and one fewer external dependency.
+// Tests running the agent as an ordinary user won't show this.
 
 type networkInterface struct {
 	Name      string   `json:"name"`
@@ -48,9 +39,8 @@ type networkRoute struct {
 	Metric      int    `json:"metric"`
 }
 
-// hostNetwork reports interfaces with their addresses, and the routing tables,
-// together. An address without its route explains nothing: a reachable-looking
-// interface with no route to the peer is the common case worth seeing.
+// hostNetwork reports interfaces with their addresses and the routing tables
+// together; an address means little without its route.
 func (s *Service) hostNetwork() (any, bool, *APIError) {
 	interfaces, err := readInterfaces()
 	if err != nil {
@@ -107,9 +97,8 @@ func readInterfaces() ([]networkInterface, error) {
 		if iface.HardwareAddr != nil {
 			record.Hardware = iface.HardwareAddr.String()
 		}
-		// An interface whose addresses cannot be read keeps its entry: the
-		// interface existing is itself a fact, and dropping it would make a
-		// partial read look like a shorter machine.
+		// An interface whose addresses can't be read keeps its entry, so a
+		// partial read doesn't look like fewer interfaces.
 		if addrs, err := iface.Addrs(); err == nil {
 			for _, addr := range addrs {
 				record.Addresses = append(record.Addresses, addr.String())
@@ -121,10 +110,9 @@ func readInterfaces() ([]networkInterface, error) {
 	return result, nil
 }
 
-// readRoutes returns both families, and a warning for each table it could not
-// read. On an IPv6-mostly estate the v6 table is the one that matters, so a
-// missing v4 table is unremarkable and a missing v6 table is not -- naming
-// which one is absent is the whole point.
+// readRoutes returns both families, and a warning naming each table it could
+// not read. On this IPv6-mostly estate a missing v6 table matters; a missing
+// v4 one usually doesn't.
 func readRoutes(procRoot string) ([]networkRoute, []string) {
 	var routes []networkRoute
 	var warnings []string

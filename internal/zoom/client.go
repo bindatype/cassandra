@@ -52,18 +52,15 @@ const formatMessage = "message"
 // pin down: what "input message" means in the signature string, and whether
 // base64UrlEncode means the URL-safe alphabet or the standard one.
 //
-// Both were settled against the live endpoint on 2026-08-30: "input message"
-// is the exact body POSTed, quotes included, and base64UrlEncode means the
-// standard alphabet. The other three constructions returned 401 "Invalid
-// signature". Probe remains because that measurement is one account on one
-// day, and a 401 is otherwise indistinguishable from a bad secret.
+// Measured on 2026-08-30: "input message" is the exact body POSTed, and
+// base64UrlEncode means the standard alphabet; the other three constructions
+// got 401 "Invalid signature". Probe stays, because a 401 otherwise looks
+// like a bad secret.
 type Variant struct {
 	Name string
-	// HashRawBody hashed the exact bytes POSTed back when those were a JSON
-	// string literal. Now that the body is the raw text, this and its opposite
-	// produce identical bytes, and Probe groups them accordingly. It is kept
-	// because Zoom's other body formats are objects, where the distinction
-	// returns.
+	// For format=message the raw body and the text are the same bytes, so
+	// this and its opposite coincide. Kept for Zoom's object body formats,
+	// where they differ.
 	HashRawBody bool
 	URLSafe     bool
 }
@@ -242,12 +239,10 @@ type ProbeResult struct {
 // down: what "input message" covers in the signature string, and which base64
 // alphabet base64UrlEncode means.
 //
-// The text and timestamp are held fixed across variants so that the only thing
-// varying is the signature construction. Standard and URL-safe base64 differ
-// only when the digest contains a byte encoding to '+' or '/', which is why
-// variants are grouped by the signature they actually produce rather than
-// assumed distinct: without that, two constructions can both look accepted
-// when only one request was ever really tried.
+// Text and timestamp are fixed, so only the construction varies. Variants are
+// grouped by the signature they produce: standard and URL-safe base64 differ
+// only when the digest has a '+' or '/', and two "accepted" variants may have
+// been one request.
 func (c *Client) Probe(ctx context.Context) ([]ProbeResult, error) {
 	if c.secret == "" {
 		return nil, fmt.Errorf("zoom: probe needs a signing secret")
@@ -373,21 +368,10 @@ func (c *Client) Describe(text string) (string, error) {
 // redactURL renders a webhook endpoint for human eyes without handing over the
 // endpoint itself.
 //
-// This file already says a webhook URL must never reach "a command line, a
-// shell history, or a cron table", and then -dry-run printed it to a terminal,
-// where it goes into scrollback, a pasted bug report, or a screen share. The
-// URL is not merely a location: /inc connect mints it per channel, so it names
-// which channel a message lands in and is as sensitive as the credential it
-// travels with.
-//
-// What survives is what a person debugging actually needs: the scheme, the
-// host, the shape of the path, and which parameters are present. What goes is
-// every opaque identifier.
-//
-// Opacity, not length, decides. The first attempt redacted any segment past 12
-// characters and swallowed "incomingwebhook" along with the id after it, which
-// removes the one part of the path that says what the request is. A minted
-// identifier mixes case or digits; a route word does not.
+// The URL is minted per channel and as sensitive as the credential beside it,
+// so -dry-run must not print it. Kept: scheme, host, path shape and which
+// parameters are present. Dropped: every opaque identifier, chosen by
+// looksMinted rather than by length.
 func redactURL(endpoint *url.URL) string {
 	shown := *endpoint
 
@@ -399,13 +383,9 @@ func redactURL(endpoint *url.URL) string {
 	}
 	shown.Path = strings.Join(segments, "/")
 
-	// format and timestamp are computed here and carry nothing private; every
-	// other parameter is assumed to. An allowlist rather than a blocklist, so
-	// a parameter added later is redacted by default rather than exposed by
-	// having been forgotten.
-	// The marker is URL-safe on purpose. "<redacted:44>" comes back out of
-	// URL.String() as "%3Credacted:44%3E", which is the sort of output a
-	// person skims past instead of reading.
+	// Only format and timestamp are shown (an allowlist, so a new parameter
+	// is redacted by default). The marker is URL-safe so URL.String() doesn't
+	// percent-encode it into noise.
 	query := shown.Query()
 	for key, values := range query {
 		if key == "format" || key == "timestamp" {
@@ -426,11 +406,8 @@ func redactURL(endpoint *url.URL) string {
 
 // redactSecret describes a credential without printing it.
 //
-// With a secret configured this is a per-message signature, which is spent as
-// soon as its timestamp ages out; with only a token it is the shared static
-// credential itself, and printing that is handing it over. Neither is shown.
-// The length and the kind are enough to tell "the wrong variant signed it"
-// from "the token is missing", which is what -dry-run is for.
+// Neither a signature nor a static token is shown; the kind and length are
+// enough to tell a wrong variant from a missing token.
 func redactSecret(value string, isStaticToken bool) string {
 	kind := "signature"
 	if isStaticToken {
