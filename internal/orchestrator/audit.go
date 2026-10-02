@@ -22,6 +22,12 @@ type AuditEvent struct {
 	RequestID string `json:"request_id"`
 	Question  string `json:"question"`
 	Model     string `json:"model"`
+	// Caller is the person a shared service answered for, and Client the agent
+	// they connected with as it names itself (claude-code, hermes, ...).
+	// Self-reported, so not proof, but it is how a cloud agent receiving GW
+	// data shows up in the record. Both are empty for a local askcass run.
+	Caller string `json:"caller,omitempty"`
+	Client string `json:"client,omitempty"`
 
 	// Proposed is the model's tool arguments, verbatim and before validation.
 	// The denied cases are the interesting ones, and a record that only kept

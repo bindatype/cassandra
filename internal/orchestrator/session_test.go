@@ -659,3 +659,29 @@ func TestThinkingIsSentOnlyWhenAskedFor(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionKeepsTheEvidenceItsModelSaw(t *testing.T) {
+	var turns int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turns++
+		if turns == 1 {
+			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+				{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}
+			]}}]}`)
+			return
+		}
+		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"node02 is disconnected."}}]}`)
+	}))
+	defer server.Close()
+
+	session := newTestSession(t, server.URL, &fakeConnector{source: broker.SourceWazuhAPI})
+	if _, err := session.Ask(context.Background(), "is node02 healthy?"); err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if got := len(session.Evidence()); got != 1 {
+		t.Fatalf("Evidence() returned %d results, want the 1 the model was given", got)
+	}
+	if _, err := session.Ask(context.Background(), "again?"); err != nil && len(session.Evidence()) > 1 {
+		t.Errorf("a second question kept the first question's evidence")
+	}
+}

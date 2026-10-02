@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -39,6 +40,9 @@ const (
 	rtEndpointEnv          = "CASS_RT_ENDPOINT"
 	rtTokenEnv             = "RT_API_TOKEN"
 	cassAgentConfigEnv     = "CASS_AGENT_CONFIG"
+	// Set by cass-mcp for the person and agent a question is answered for.
+	callerEnv = "CASS_CALLER"
+	clientEnv = "CASS_CLIENT"
 	// rtQueuesEnv names the RT queues this deployment allows searching, as a
 	// comma-separated list. Site configuration, not a connector default: RT
 	// queues are organization-specific and there is no safe default that
@@ -86,6 +90,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	showTrace := flags.Bool("trace", false, "print the policy decision trace to stderr")
 	auditPath := flags.String("audit", env.Get(auditPathEnv), "append a JSON-lines audit record for each question")
 	timeout := flags.Duration("timeout", 180*time.Second, "overall timeout")
+	asJSON := flags.Bool("json", false, "print {answer, evidence} as JSON instead of the answer alone")
 	// Written out rather than left to PrintDefaults, because a list of flags
 	// does not tell someone what the tool is for. The first thing a new user
 	// needs is the shape of a question it can answer.
@@ -141,6 +146,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		defer auditor.Close()
 		session = session.WithAudit(auditor, *model)
 	}
+	session = session.WithCaller(env.Get(callerEnv), env.Get(clientEnv))
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -160,6 +166,27 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintf(stderr, "  [%s] %s %s\n", verdict, entry.Stage, entry.Detail)
 		}
+	}
+	if *asJSON {
+		out := struct {
+			Answer   string             `json:"answer,omitempty"`
+			Error    string             `json:"error,omitempty"`
+			Evidence []connector.Result `json:"evidence"`
+		}{Answer: answer, Evidence: session.Evidence()}
+		if askErr != nil {
+			out.Error = askErr.Error()
+		}
+		if out.Evidence == nil {
+			out.Evidence = []connector.Result{}
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
+			fmt.Fprintf(stderr, "cass-chat: encode: %v\n", err)
+			return 1
+		}
+		if askErr != nil {
+			return 1
+		}
+		return 0
 	}
 	if askErr != nil {
 		fmt.Fprintf(stderr, "cass-chat: %v\n", askErr)

@@ -247,9 +247,14 @@ type Session struct {
 	intents  []string
 	auditor  *Auditor
 	model    string
+	caller   string
+	agent    string
 	trace    []TraceEntry
 	event    AuditEvent
 	started  time.Time
+	// evidence is every result that reached the model, for callers that want
+	// the figures as data rather than retyped in prose.
+	evidence []connector.Result
 }
 
 // WithAudit attaches an audit destination. Without one the session still works
@@ -259,6 +264,17 @@ func (s *Session) WithAudit(auditor *Auditor, model string) *Session {
 	s.model = model
 	return s
 }
+
+// WithCaller records who asked and through which agent, for a service that
+// answers for many people. Both are empty for a local askcass run.
+func (s *Session) WithCaller(person, client string) *Session {
+	s.caller = person
+	s.agent = client
+	return s
+}
+
+// Evidence returns every result the model was given while answering.
+func (s *Session) Evidence() []connector.Result { return s.evidence }
 
 // TraceEntry records one step of the loop so an operator can see exactly what
 // the model proposed and what policy did with it.
@@ -376,11 +392,14 @@ func discloseWithheldEvidence(answer string, withheld bool) string {
 
 func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 	s.trace = nil
+	s.evidence = nil
 	s.started = time.Now()
 	s.event = AuditEvent{
 		RequestID: newRequestID(),
 		Question:  question,
 		Model:     s.model,
+		Caller:    s.caller,
+		Client:    s.agent,
 		Decision:  "no_tool_call",
 		Status:    "answered",
 	}
@@ -627,6 +646,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		}
 
 		succeeded++
+		s.evidence = append(s.evidence, result)
 		s.record("evidence_collected", fmt.Sprintf("%d source(s)", len(result.Evidence)), true)
 		for _, evidence := range result.Evidence {
 			s.event.Calls = append(s.event.Calls, AuditCall{
