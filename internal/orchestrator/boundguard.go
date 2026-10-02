@@ -7,11 +7,10 @@ import (
 	"github.com/bindatype/cassandra/internal/broker"
 )
 
-// A ticket's age bound is easy to invert, and the prompt rule saying so did
-// not hold: asked for owners' oldest tickets "less than 365 days old", the
-// model sent until: 365d -- tickets OLDER than a year -- and the answer that
-// followed was "no open tickets are less than 365 days old" against 569 that
-// were. The question is in hand here, so the contradiction is checked in code.
+// The model inverts ticket age bounds ("less than 365 days old" sent as
+// until: 365d, i.e. older than a year), and the prompt rule against it did
+// not hold. The question is in hand here, so the contradiction is checked in
+// code.
 var (
 	asksNewer = regexp.MustCompile(`(?i)\b(?:less|fewer) than \d+ ?(?:day|week|month|year)s? old\b|` +
 		`\bunder \d+ ?(?:day|week|month|year)s? old\b|\b(?:younger|newer) than\b|` +

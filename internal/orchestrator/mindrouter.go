@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	// A cold load of a large model on an idle GPU can exceed two minutes, and
-	// scoring that as a failure hides a working model behind a client defect.
+	// A cold model load on an idle GPU can take over two minutes.
 	defaultTimeout   = 300 * time.Second
 	maxResponseBytes = 1 << 20
 )
@@ -127,17 +126,12 @@ type completionResponse struct {
 }
 
 // Complete sends one chat completion request and returns the first choice.
-// forceTool names a function the model must call. Empty leaves the choice to
-// the model, which is what allows it to decline a question no source can
-// answer.
+// forceTool names a function the model must call; empty leaves the choice to
+// the model, so it can decline a question no source can answer.
 //
-// Note that MindRouter does not currently honour this. Measured on
-// 2026-08-27, a request naming a function by name still returned
-// finish_reason "stop" with no tool call, for every model tried. The field is
-// sent because it is the correct request to make and other gateways respect
-// it, but nothing here should be written as though a call were guaranteed:
-// the caller must still handle a response that describes a call instead of
-// making one.
+// gemma4-31b-vllm honours a forced call (measured 2026-10-02); the ollama
+// models behind MindRouter did not (2026-08-27). Callers must still handle a
+// response that describes a call instead of making one.
 func (c *MindRouterClient) Complete(ctx context.Context, messages []Message, tools []any, forceTool string) (Choice, error) {
 	body := map[string]any{
 		"model":    c.model,
