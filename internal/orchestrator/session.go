@@ -67,12 +67,13 @@ const (
 	// schema, run a query, and correct it once.
 	maxToolCalls = 5
 
-	// servedContextTokens is the context gemma4-31b-vllm is actually served
-	// with, measured by scripts/ctx_marker_probe.py, not read from config.
-	// vLLM refuses an oversized request with HTTP 400; an ollama backend
-	// instead silently drops the head of the request, which is the system
-	// prompt. The guard (roomForMore) covers both. Re-measure after any
-	// gateway or model change.
+	// servedContextTokens is the context gemma4-31b-vllm was measured to serve
+	// by scripts/ctx_marker_probe.py on 2026-09-04, not read from config. The
+	// gateway has reported 244,000 since vLLM's max-model-len was raised;
+	// that is not yet re-measured, and a low value errs safe. vLLM refuses an
+	// oversized request with HTTP 400; an ollama backend instead silently
+	// drops the head of the request, which is the system prompt. roomForMore
+	// covers both. Re-measure after any gateway or model change.
 	servedContextTokens = 131072
 
 	// Characters per token, measured against the served tokenizer: JSON
