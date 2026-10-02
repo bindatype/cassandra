@@ -120,19 +120,11 @@ func TestRTLiveBoundNarrows(t *testing.T) {
 		t.Error("evidence does not record the bound it applied; an unrecorded filter cannot be audited")
 	}
 
-	// Equal counts used to be a warning here. That was the wrong resolution: it
-	// is simultaneously the signature of an honest result (every open ticket
-	// really is old) and of a bound that never reached RT, and a test that
-	// cannot separate those resolves the ambiguity the reassuring way.
-	//
-	// Ask RT how many open tickets are YOUNGER than the bound. That number is
-	// what the bound is supposed to exclude, so it decides the case: if any
-	// exist, the bounded total must be strictly smaller, and RT's own two
-	// halves must sum to its own whole.
-	// Scoped to the same queues as the other two counts. Passing nil here
-	// swept every queue in RT and made the sum check fail on the first live
-	// run: 304 older + 311 newer against 458 open, because "newer" was
-	// counting queues the allowlist excludes.
+	// Equal counts mean either every open ticket is old or the bound never
+	// reached RT. Ask RT how many are YOUNGER than the bound to decide: if
+	// any exist, the bounded total must be smaller, and the two halves must
+	// sum to the whole. Scoped to the allowlisted queues, like the other two
+	// counts.
 	younger, err := rtLiveDirectCount(ctx, queues, bound, "")
 	if err != nil {
 		t.Fatalf("direct RT count of tickets newer than the bound: %v", err)
@@ -171,17 +163,9 @@ func TestRTLiveBoundIsTheRightSide(t *testing.T) {
 		t.Skipf("no tickets older than %d days; nothing to check the direction against", rtLiveAgeDays)
 	}
 
-	// RT renders dates in more than one format depending on configuration, and
-	// nothing in the connector parses Created -- it is passed through as a
-	// string, so the fixtures assert a format nobody has checked against a
-	// live instance. Accept both, and count what was actually verified.
-	//
-	// The first version of this test logged an unparseable date and continued.
-	// Had the format differed, every item would have been skipped and the test
-	// would have PASSED having checked nothing -- reporting the bound
-	// direction as sound on the evidence of zero tickets. A check that cannot
-	// run must say so loudly; one that quietly verifies nothing is worse than
-	// no check, because it also stops anyone looking.
+	// RT can render dates in more than one format. Accept each, count what was
+	// actually verified, and fail if nothing was: skipping unparseable items
+	// would pass having checked nothing.
 	layouts := []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"}
 	checked, unparseable := 0, []string{}
 	for _, item := range evidence.Items {
@@ -218,10 +202,8 @@ func TestRTLiveBoundIsTheRightSide(t *testing.T) {
 }
 
 // TestRTLiveCensusAccountsForEveryTicket asserts the owner breakdown is a
-// census over every matching ticket rather than a tally of the returned page.
-// A breakdown that silently covers less than the total is the failure the
-// answer on 2026-09-02 actually made -- 100 rows of 428 reported as a property
-// of RT -- and here it must be either complete or warned about.
+// census over every matching ticket, or warns that it isn't, rather than a
+// tally of the returned page.
 func TestRTLiveCensusAccountsForEveryTicket(t *testing.T) {
 	rt, _ := rtLiveConnector(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)

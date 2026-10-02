@@ -39,12 +39,8 @@ func TestPromptCountsItsOwnChannels(t *testing.T) {
 	if !ok {
 		t.Fatalf("no spelling for %d intents; extend this table", len(broker.AllIntents()))
 	}
-	// The count is stated twice, at the top as channels and in the closing
-	// contract as intents. Only the first was guarded, and on 2026-09-03 the
-	// prompt said eight channels in one place and five intents in the other --
-	// two instructions to the same model in the same document, disagreeing.
-	// Every place the number appears has to be checked, or guarding one of
-	// them just moves the staleness somewhere unwatched.
+	// The count appears twice (channels at the top, intents in the closing
+	// contract); both are checked.
 	for _, phrase := range []string{
 		"these " + want + " evidence channels",
 		"these " + want + " intents",
@@ -120,21 +116,10 @@ func TestPromptRetainsItsHardWonRules(t *testing.T) {
 
 func TestPromptAndEvidenceLeaveRoomToAnswer(t *testing.T) {
 	// The prompt and a maximal evidence payload both travel on the synthesis
-	// turn, so together they must leave room for the question, the tool call
-	// and an answer of useful length. Three quarters is the line.
-	//
-	// This used to hardcode `32000 * 4`, with a comment that every model on
-	// the gateway was capped at 32k tokens regardless of its native context.
-	// That was true, and stopped being true when the backend moved to vLLM.
-	// servedContextTokens was re-measured to 131072 and this was not, so the
-	// guard went on enforcing a ceiling four times lower than the real one --
-	// the same two-copies-of-a-number drift this project keeps finding.
-	//
-	// Deriving it from servedContextTokens and the measured character ratios
-	// means the two cannot disagree again, and it counts tokens rather than
-	// bytes, which is what the window is actually denominated in. Prose and
-	// JSON are counted at their own ratios because a byte of evidence costs
-	// nearly twice a byte of prompt.
+	// turn and must leave room for the question, the call and an answer:
+	// three quarters of the served context is the line. Derived from
+	// servedContextTokens and the measured ratios, never a second copy of the
+	// number.
 	promptTokens := int(float64(len(systemPrompt)) / proseCharsPerToken)
 	evidenceBytes := maxEvidenceJSON
 	evidenceTokens := int(float64(evidenceBytes) / jsonCharsPerToken)
@@ -148,9 +133,8 @@ func TestPromptAndEvidenceLeaveRoomToAnswer(t *testing.T) {
 }
 
 func TestEvidenceBudgetExceedsWhatConnectorsReturn(t *testing.T) {
-	// A connector allowed to return more than this will produce a query that
-	// succeeds against the database and is then rejected here, which reads to
-	// the caller as a failure of the query rather than of the configuration.
+	// A connector returning more than the budget produces a query that
+	// succeeds and is then discarded, which looks like a query failure.
 	const largestConnectorPayload = 48 * 1024 // pegasusMaxTotalBytes
 	if maxEvidenceJSON <= largestConnectorPayload {
 		t.Errorf("evidence budget %d does not exceed the largest connector payload %d",
@@ -158,15 +142,9 @@ func TestEvidenceBudgetExceedsWhatConnectorsReturn(t *testing.T) {
 	}
 }
 
-// TestPromptTeachesTicketAgeDirection guards the mapping the model got wrong
-// in the field on 2026-09-02: "older than N days" is an `until`, not a
-// `since`, and it stands alone. The prompt told the model to ask RT for an
-// exact count with the bound applied, and separately that a lone `since` is a
-// ray; it never said which field carries ticket age. The model sent no bound,
-// got 100 of 428 tickets, and tallied dates and owners off the page.
-//
-// This asserts the guidance is present, not that a model follows it. Only an
-// eval can show the second, and there is no RT eval harness yet.
+// TestPromptTeachesTicketAgeDirection guards the mapping "older than N days"
+// is a lone `until`, not a `since`. It asserts the guidance is present, not
+// that a model follows it.
 func TestPromptTeachesTicketAgeDirection(t *testing.T) {
 	required := []string{
 		"`until` bounds the older side",
@@ -199,14 +177,8 @@ func TestPromptTeachesEndpointEvidence(t *testing.T) {
 }
 
 // pricedRules are the rules with an incident behind them. Each names the
-// marker that delimits it and a phrase that must survive any rewrite.
-//
-// The prompt has ~128 rules and, before this, three guards. A defensive
-// rewrite in August cut it from 12,376 to 10,706 bytes, scored the same on
-// the head-to-head suite, and silently dropped three rules -- the runTBL2
-// column list cost about two hours of guessed column names before anyone
-// worked out why. The lesson recorded then was that a fixed suite only
-// measures the shapes it contains. These are the shapes it did not contain.
+// marker that delimits it and a phrase that must survive any rewrite. A fixed
+// eval suite measures only the shapes it contains; these guard the rest.
 var pricedRules = []struct {
 	marker string
 	phrase string
@@ -300,17 +272,9 @@ func rawPromptForTest(t *testing.T) string {
 // absence of evidence into a reassurance are named in eval_ablate.py's
 // protected list.
 //
-// That protection used to be the absence of an ablation marker. On 2026-09-03
-// eleven rules were marked so their loss could be guarded -- correct in
-// itself -- and four of them were safety rules, so the protection silently
-// ended in the same commit that improved the guarding. A safeguard that holds
-// only while nobody does the obvious thing is not a safeguard.
-//
-// The harness scores against a pegasusdb suite, so for most of these it would
-// report "removal costs nothing" while being structurally incapable of seeing
-// the failure. That is not a null result; it is a wrong one, and it would read
-// as permission to delete the rule that exists because a false all-clear was
-// posted while five critical agents were down.
+// The ablation harness scores a pegasusdb suite, so it would report "removal
+// costs nothing" for rules whose failure it cannot see. Protection must be an
+// explicit list, not the absence of a marker.
 func TestSafetyRulesCannotBeAblated(t *testing.T) {
 	raw, err := os.ReadFile("../../scripts/eval_ablate.py")
 	if err != nil {
@@ -347,15 +311,9 @@ func TestSafetyRulesCannotBeAblated(t *testing.T) {
 // maxEvidenceJSON caps one result. Nothing capped the total, and every result
 // stays in the message history, so five are sent together on the final turn.
 //
-// Under the previous backend that overflow was silent: the gateway discarded
-// the head and kept the tail, and the head is the system prompt, so the safety
-// rules were the first thing lost exactly when the context was largest. The
-// current backend refuses with HTTP 400 instead, which is survivable but still
-// a failed answer, so the arithmetic is still worth asserting.
-//
-// The numbers move when the backend moves. They are held in one place, in
-// session.go, with the measurement that produced each; this test does the sums
-// so that a change there cannot quietly stop adding up.
+// An overflow is a gateway 400 on vLLM, or a silently dropped system prompt
+// on an ollama backend. The numbers live in session.go; this test does the
+// sums so a change there can't quietly stop adding up.
 func TestContextBudgetIsNotAlreadyExceeded(t *testing.T) {
 	promptTokens := int(float64(len(systemPrompt)) / proseCharsPerToken)
 	schema, err := json.Marshal(ToolDefinition([]string{"monitoring.problems"}))
@@ -377,9 +335,8 @@ func TestContextBudgetIsNotAlreadyExceeded(t *testing.T) {
 	if fixed+oneResult <= servedContextTokens {
 		return
 	}
-	// Not a failure: it is the finding. A single maximum-size result does not
-	// fit, so maxEvidenceJSON is larger than the window can carry and the
-	// cumulative guard is what stops it reaching the gateway.
+	// Not a failure: if one maximum-size result doesn't fit, roomForMore is
+	// what keeps it from reaching the gateway. Logged so it is seen.
 	t.Logf("NOTE: one maximum-size result (%d) plus fixed cost (%d) = %d, over the %d served context. "+
 		"The per-result cap alone would overflow; roomForMore is what prevents it.",
 		oneResult, fixed, fixed+oneResult, servedContextTokens)
@@ -405,12 +362,10 @@ func TestRoomForMoreRefusesBeforeTheGatewayTruncates(t *testing.T) {
 			"the guard is too tight to be usable")
 	}
 
-	// A full run of real-size results must stay inside the window. Whether the
-	// guard closes before maxToolCalls is a property of the window, not of the
-	// guard: against the 32,768 this once assumed it closed on the second
-	// result, and asserting that it must close made the test fail when the
-	// backend got bigger. The invariant is that the history never passes what
-	// the gateway serves.
+	// A full run of real-size results must stay inside the window. Whether
+	// the guard closes before maxToolCalls depends on the window size, so
+	// only the invariant is asserted: the history never exceeds what the
+	// gateway serves.
 	added := 0
 	for i := 0; i < maxToolCalls; i++ {
 		if _, ok := roomForMore(messages, tools, realResult); !ok {
@@ -447,10 +402,8 @@ func TestRoomForMoreRefusesBeforeTheGatewayTruncates(t *testing.T) {
 	t.Logf("guard refused with %d maximum-size result(s) held, at %d of %d tokens",
 		len(flood)-1, estimatedTokens(flood, tools), servedContextTokens)
 
-	// The per-result cap is larger than the window can deliver, which is a
-	// finding rather than a failure: it means a maximum-size result can never
-	// be returned, and this guard is what turns that into a refusal with a
-	// reason instead of a silently decapitated request.
+	// If the per-result cap exceeds what fits beside the prompt, a
+	// maximum-size result can never be delivered; log it rather than fail.
 	fits := int(float64(servedContextTokens-estimatedTokens(
 		[]Message{{Role: "system", Content: systemPrompt}}, tools)) * jsonCharsPerToken)
 	if evidenceBudget() > fits {

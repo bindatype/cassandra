@@ -262,9 +262,10 @@ func TestGrantRequiringCommandsAreNotShippedBlind(t *testing.T) {
 		}
 	}
 
-	// dmesg may be implemented, but must not be enabled by default: the
-	// shipped unit sets ProtectKernelLogs=yes, so a default-on kernel.messages
-	// could only ever refuse.
+	// kernel.messages stays opt-in. The error text below predates the repo
+	// unit's ProtectKernelLogs=no (2026-09-18); kernel.dmesg_restrict=1 can
+	// still block it on a given host. Whether it should now be default-on is
+	// an open decision.
 	for _, name := range defaultEnabledOperations() {
 		if name == operationKernelMessages {
 			t.Errorf("%s is enabled by default, but ProtectKernelLogs=yes in the shipped unit "+
