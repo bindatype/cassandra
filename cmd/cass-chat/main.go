@@ -85,7 +85,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// After the flags have read their defaults, warn once if any came from
-	// legacy SROIAAA_* names, so the shim doesn't outlive the rename.
+	// legacy names (see internal/env), so the shim doesn't outlive the rename.
 	env.ReportLegacy(stderr)
 	// One message per missing flag, naming the right one.
 	if *policyPath == "" {
