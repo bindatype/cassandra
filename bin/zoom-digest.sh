@@ -174,7 +174,11 @@ digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs c
 # rather than caller-tunable) and the model narrows to five in its own
 # prose; asking RT itself for a page of five was considered and deliberately
 # skipped -- see the discussion this replaced.
-digest "Longest-open tickets" "which tickets are still open and were created more than 30 days ago? State the total number matching, then list only the 5 oldest, each as a bulleted line with its subject, owner, and how many days it has been open."
+#
+# "Active", not "open": the word sets status: active, which searches RT's own
+# __Active__ statuses. "Open" searches new, open and stalled, which misses
+# active tickets in queues whose lifecycle uses other statuses.
+digest "Longest-open tickets" "which tickets are still active and were created more than 30 days ago? State the total number matching, then list only the 5 oldest, each as a bulleted line with its subject, owner, and how many days it has been open."
 
 
 # A dry run deliberately writes no receipt. If it did, testing by hand would

@@ -1,6 +1,6 @@
 #!/bin/sh
 # rt_oldest_open.sh -- ask Request Tracker directly, with no Cassandra code in
-# the path, for open tickets created more than N days ago: a count per queue,
+# the path, for active tickets created more than N days ago: a count per queue,
 # the total, and the oldest few.
 #
 #   RT_API_TOKEN=...  scripts/rt_oldest_open.sh [-d DAYS] [-n COUNT] [-a | QUEUE ...]
@@ -11,7 +11,9 @@
 #
 # Needs RT_API_TOKEN (an RT auth token, not the Zabbix key) in the environment.
 # The endpoint defaults to CASS_RT_ENDPOINT, else https://tickets.arc.gwu.edu.
-# "Open" means RT's active statuses: new, open, stalled. Dates are sent in this
+# "Active" is RT's own Status = '__Active__', which follows each queue's
+# lifecycle, as Cassandra's status: active does. It is not new/open/stalled:
+# queues with their own lifecycles count differently. Dates are sent in this
 # machine's local time, which is how RT reads a bare date literal.
 set -eu
 
@@ -34,7 +36,7 @@ if [ -z "${RT_API_TOKEN:-}" ]; then
 fi
 endpoint=${CASS_RT_ENDPOINT:-https://tickets.arc.gwu.edu}
 cutoff=$(python3 -c "import datetime,sys; print((datetime.datetime.now()-datetime.timedelta(days=int(sys.argv[1]))).strftime('%Y-%m-%d %H:%M:%S'))" "$days")
-active="(Status = 'new' OR Status = 'open' OR Status = 'stalled')"
+active="Status = '__Active__'"
 
 rt() { # rt QUERY PER_PAGE
 	curl -sS --fail -m 60 -G "$endpoint/REST/2.0/tickets" \
@@ -61,7 +63,7 @@ else
 	names="rtshelp${nl}hpchelp"
 fi
 
-echo "Open tickets created before $cutoff (more than $days days ago), from $endpoint"
+echo "Active tickets created before $cutoff (more than $days days ago), from $endpoint"
 echo
 clause=""
 oldifs=$IFS
