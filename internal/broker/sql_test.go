@@ -215,3 +215,33 @@ ORDER BY day`
 		t.Fatalf("a plain aggregate has no window function to conflict with: %v", err)
 	}
 }
+
+// A backslash-escaped quote does not end a MariaDB string literal, so the
+// words inside it are not clauses.
+func TestGroupByPartitionCheckSkipsEscapedQuotes(t *testing.T) {
+	query := `SELECT netid, COUNT(*) AS jobs FROM runTBL2
+WHERE comment = 'it\'s (partition by netid) noise' AND account = 'o\'brien'
+GROUP BY netid`
+	if column, ok := conflictingGroupByPartitionColumn(query); ok {
+		t.Fatalf("PARTITION BY inside a string literal was read as a clause on %q", column)
+	}
+}
+
+func TestGroupByPartitionCheckEndsGroupByAtUnion(t *testing.T) {
+	query := `SELECT netid, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY StartTime - SubmitTime) OVER (PARTITION BY netid) AS p50
+FROM runTBL2 GROUP BY netid
+UNION ALL
+SELECT netid, 0 FROM runTBL`
+	if column, ok := conflictingGroupByPartitionColumn(query); !ok || column != "netid" {
+		t.Fatalf("degenerate first UNION arm: got (%q, %v), want (\"netid\", true)", column, ok)
+	}
+}
+
+func TestGroupByPartitionCheckKeepsUnionArmsApart(t *testing.T) {
+	query := `SELECT netid, RANK() OVER (PARTITION BY netid ORDER BY StartTime) AS rnk FROM runTBL2
+UNION ALL
+SELECT netid, COUNT(*) FROM runTBL GROUP BY netid`
+	if column, ok := conflictingGroupByPartitionColumn(query); ok {
+		t.Fatalf("GROUP BY and PARTITION BY in different UNION arms were paired on %q", column)
+	}
+}

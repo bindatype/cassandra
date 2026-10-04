@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const (
@@ -149,5 +150,32 @@ func TestTheServicesOwnKeyNeverReachesAQuestion(t *testing.T) {
 func TestAllowlistRejectsMalformedLines(t *testing.T) {
 	if _, err := parseAllowlist(bytes.NewBufferString("glen sha256:abc\n")); err == nil {
 		t.Error("a malformed line was accepted")
+	}
+}
+
+func TestIdleSessionsAreForgottenWhenANewOneStarts(t *testing.T) {
+	s, _ := testServer(t, nil)
+	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"hermes"}}}`
+	stale := rpc(t, s, glenKey, "", initialize).Header().Get("Mcp-Session-Id")
+	live := rpc(t, s, glenKey, "", initialize).Header().Get("Mcp-Session-Id")
+	s.mu.Lock()
+	s.sessions[stale] = session{client: "hermes", seen: time.Now().Add(-sessionIdleTTL - time.Minute)}
+	s.sessions[live] = session{client: "hermes", seen: time.Now().Add(-sessionIdleTTL + time.Minute)}
+	s.mu.Unlock()
+
+	// Using a session keeps it; starting another sweeps out the idle ones.
+	rpc(t, s, glenKey, live, `{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+	rpc(t, s, glenKey, "", initialize)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions[stale]; ok {
+		t.Error("a session idle longer than sessionIdleTTL survived a new initialize")
+	}
+	if _, ok := s.sessions[live]; !ok {
+		t.Error("a session used just now was forgotten")
+	}
+	if len(s.sessions) != 2 {
+		t.Errorf("%d sessions remembered, want 2 (the live one and the new one)", len(s.sessions))
 	}
 }

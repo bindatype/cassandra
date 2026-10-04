@@ -16,7 +16,8 @@ import (
 //
 // The fix (window over raw rows in a subquery, GROUP BY outside) names both
 // clauses too, in different scopes. So only a PARTITION BY not enclosed by a
-// parenthesized span containing a SELECT counts.
+// parenthesized span containing a SELECT counts, and each top-level UNION arm
+// is checked on its own.
 func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 	groupBy := findKeyword(query, `group\s+by`)
 	partitionBy := findKeyword(query, `partition\s+by`)
@@ -51,9 +52,18 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		partitionByAt[p[0]] = true
 	}
 
-	var groupCols []string
-	sawTopLevelGroupBy := false
-	var topLevelPartitionCols [][]string
+	unionAt := make(map[int]bool)
+	for _, u := range findKeyword(query, `union`) {
+		unionAt[u[0]] = true
+	}
+
+	type selectArm struct {
+		groupCols     []string
+		sawGroupBy    bool
+		partitionCols [][]string
+	}
+	arms := []selectArm{{}}
+	arm := &arms[0]
 
 	i := 0
 	n := len(query)
@@ -61,11 +71,7 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		c := query[i]
 		switch c {
 		case '\'', '"', '`':
-			j := i + 1
-			for j < n && query[j] != c {
-				j++
-			}
-			i = j + 1
+			i = skipSQLQuoted(query, i)
 			continue
 		case '(':
 			depth++
@@ -80,6 +86,12 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 			i++
 			continue
 		}
+		if unionAt[i] && depth == 0 {
+			arms = append(arms, selectArm{})
+			arm = &arms[len(arms)-1]
+			i += len("union")
+			continue
+		}
 		if selectAt[i] {
 			if depth > 0 {
 				isSubquery[depth-1] = true
@@ -90,7 +102,7 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		if partitionByAt[i] {
 			if !inSubquery() {
 				cols, next := readColumnList(query, matchEnd(query, i, `partition\s+by`))
-				topLevelPartitionCols = append(topLevelPartitionCols, cols)
+				arm.partitionCols = append(arm.partitionCols, cols)
 				i = next
 				continue
 			}
@@ -100,8 +112,8 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		if groupByAt[i] {
 			if depth == 0 {
 				cols, next := readColumnList(query, matchEnd(query, i, `group\s+by`))
-				groupCols = cols
-				sawTopLevelGroupBy = true
+				arm.groupCols = cols
+				arm.sawGroupBy = true
 				i = next
 				continue
 			}
@@ -111,14 +123,22 @@ func conflictingGroupByPartitionColumn(query string) (column string, ok bool) {
 		i++
 	}
 
-	if !sawTopLevelGroupBy {
+	for _, a := range arms {
+		if column, ok := degenerateGrouping(a.groupCols, a.sawGroupBy, a.partitionCols); ok {
+			return column, true
+		}
+	}
+	return "", false
+}
+
+// degenerateGrouping reports whether one SELECT arm's PARTITION BY columns
+// include every GROUP BY column. GROUP BY day, netid with PARTITION BY netid
+// still leaves one row per day in each partition.
+func degenerateGrouping(groupCols []string, sawGroupBy bool, partitionCols [][]string) (string, bool) {
+	if !sawGroupBy {
 		return "", false
 	}
-
-	// Degenerate only if the PARTITION BY columns include every GROUP BY
-	// column. GROUP BY day, netid with PARTITION BY netid still leaves one
-	// row per day in each partition.
-	for _, cols := range topLevelPartitionCols {
+	for _, cols := range partitionCols {
 		partitionSet := make(map[string]bool, len(cols))
 		for _, c := range cols {
 			partitionSet[c] = true
@@ -161,13 +181,16 @@ func matchEnd(query string, i int, pattern string) int {
 // readColumnList reads the column list following GROUP BY or PARTITION BY,
 // stopping at the next clause keyword or an unmatched closing paren -- the
 // end of the OVER(...) a PARTITION BY lives inside, or the end of the
-// statement for a top-level GROUP BY.
+// statement or UNION arm for a top-level GROUP BY.
 func readColumnList(query string, from int) (cols []string, next int) {
-	stop := regexp.MustCompile(`(?i)\b(order\s+by|having|limit|window)\b`)
+	stop := regexp.MustCompile(`(?i)\b(order\s+by|having|limit|window|union)\b`)
 	depth := 0
 	end := len(query)
 	for i := from; i < len(query); i++ {
 		switch query[i] {
+		case '\'', '"', '`':
+			i = skipSQLQuoted(query, i) - 1
+			continue
 		case '(':
 			depth++
 		case ')':

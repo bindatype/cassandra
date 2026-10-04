@@ -173,12 +173,24 @@ def jobs_on_hosts(cass, hosts, since, until):
     return result
 
 
+def overnight_window(midnight, start_hour, end_hour):
+    """The overnight window that starts on the day beginning at midnight.
+
+    An end hour at or before the start hour wraps past midnight: 22-6 runs
+    from 22:00 to 06:00 the next day, and is filed under the day it starts.
+    """
+    a, b = midnight + dt.timedelta(hours=start_hour), midnight + dt.timedelta(hours=end_hour)
+    if b <= a:
+        b += dt.timedelta(days=1)
+    return a, b
+
+
 def overnight_coverage(rows, since, until, start_hour, end_hour):
     """Per night: was any job running during start_hour..end_hour UTC on that host."""
     nights = {}
-    day = since.replace(hour=0, minute=0, second=0)
+    day = since.replace(hour=0, minute=0, second=0, microsecond=0)
     while day < until:
-        a, b = day + dt.timedelta(hours=start_hour), day + dt.timedelta(hours=end_hour)
+        a, b = overnight_window(day, start_hour, end_hour)
         running = [r for r in rows if int(r.get("StartTime") or 0) < b.timestamp()
                    and (int(r.get("EndTime") or 0) == 0 or int(r.get("EndTime")) > a.timestamp())]
         nights[day.strftime("%Y-%m-%d")] = len(running)
@@ -203,6 +215,8 @@ def main():
 
     since, until = when(args.since), when(args.until)
     o_start, o_end = (int(x) for x in args.overnight.split("-"))
+    if not (0 <= o_start <= 24 and 0 <= o_end <= 24):
+        sys.exit("--overnight hours must be 0-24, e.g. 0-6 or 22-6")
     repo = args.repo
     if not repo:
         askcass = shutil.which("askcass")
@@ -243,9 +257,10 @@ def main():
             total += t
             hosts.update(h)
             exact = exact and x
-            a, b = d.replace(hour=o_start), d.replace(hour=0) + dt.timedelta(hours=o_end)
-            if a < e:
-                overnight[day] = window_total(cass, a, min(b, e), match)
+            a, b = overnight_window(d.replace(hour=0, minute=0, second=0, microsecond=0), o_start, o_end)
+            a, b = max(a, since), min(b, until)
+            if a < b:
+                overnight[day] = window_total(cass, a, b, match)
         sample = sample_items(cass, days, match)
         names = collections.Counter(readable(i.get("description", "")) for i in sample)
         severities = collections.Counter(i.get("severity", "") for i in sample)
@@ -302,9 +317,12 @@ def main():
 def render_detail(d):
     w = d["window"]
     days = list(d["total_by_day"])
+    o_start, o_end = (int(x) for x in w["overnight_utc"].split("-"))
+    wraps = " (each night is listed under the day it starts)" if o_end <= o_start else ""
     lines = ["# Zabbix alert triage: detail report", "",
-             "Window: %s to %s (UTC). Overnight means %s UTC. Generated %s from %s." % (
-                 w["since"], w["until"], w["overnight_utc"].replace("-", ":00-") + ":00", d["generated"], d["source"]),
+             "Window: %s to %s (UTC). Overnight means %s UTC%s. Generated %s from %s." % (
+                 w["since"], w["until"], w["overnight_utc"].replace("-", ":00-") + ":00", wraps, d["generated"],
+                 d["source"]),
              "Every figure below is a count returned by Zabbix or the accounting database; none was typed by a model.", "",
              "## All problem events", "", "Total: **%s**" % format(d["total_problem_events"], ","), "",
              "| Day | " + " | ".join(days) + " |", "|---|" + "---|" * len(days),

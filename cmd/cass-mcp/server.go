@@ -53,7 +53,7 @@ type Server struct {
 	mu        sync.Mutex
 	inflight  int
 	perPerson map[string]int
-	sessions  map[string]string // Mcp-Session-Id -> client name
+	sessions  map[string]session // by Mcp-Session-Id
 	valid     map[string]time.Time
 }
 
@@ -61,12 +61,23 @@ func NewServer(allowlist *Allowlist, validate Validator, run Runner, maxInflight
 	return &Server{
 		allowlist: allowlist, validate: validate, run: run,
 		maxInflight: maxInflight, maxPerUser: maxPerUser, log: log,
-		perPerson: map[string]int{}, sessions: map[string]string{}, valid: map[string]time.Time{},
+		perPerson: map[string]int{}, sessions: map[string]session{}, valid: map[string]time.Time{},
 	}
 }
 
 // tokenCacheTTL bounds how long a revoked MindRouter key keeps working here.
 const tokenCacheTTL = 60 * time.Second
+
+// sessionIdleTTL is how long an unused session is remembered. Many clients
+// reconnect without the DELETE that ends a session, so without it the map
+// grows for the life of the process. A session only names the client in the
+// log, so forgetting one costs nothing but that name.
+const sessionIdleTTL = 24 * time.Hour
+
+type session struct {
+	client string
+	seen   time.Time
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/mcp" {
@@ -150,6 +161,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request, caller Caller
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
+	caller.Client = s.touchSession(r.Header.Get("Mcp-Session-Id"))
 	switch req.Method {
 	case "initialize":
 		var params struct {
@@ -168,8 +180,14 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request, caller Caller
 		}
 		id := newSessionID()
 		client := strings.TrimSpace(params.ClientInfo.Name + " " + params.ClientInfo.Version)
+		now := time.Now()
 		s.mu.Lock()
-		s.sessions[id] = client
+		for old, sess := range s.sessions {
+			if now.Sub(sess.seen) > sessionIdleTTL {
+				delete(s.sessions, old)
+			}
+		}
+		s.sessions[id] = session{client: client, seen: now}
 		s.mu.Unlock()
 		w.Header().Set("Mcp-Session-Id", id)
 		writeRPC(w, req.ID, map[string]any{
@@ -183,13 +201,27 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request, caller Caller
 	case "tools/list":
 		writeRPC(w, req.ID, map[string]any{"tools": []any{askTool()}}, nil)
 	case "tools/call":
-		s.mu.Lock()
-		caller.Client = s.sessions[r.Header.Get("Mcp-Session-Id")]
-		s.mu.Unlock()
 		writeRPC(w, req.ID, s.callTool(r.Context(), caller, req.Params), nil)
 	default:
 		writeRPC(w, req.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method})
 	}
+}
+
+// touchSession marks a session used and returns its client name, or "" for
+// an unknown or expired one.
+func (s *Server) touchSession(id string) string {
+	if id == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return ""
+	}
+	sess.seen = time.Now()
+	s.sessions[id] = sess
+	return sess.client
 }
 
 func (s *Server) callTool(ctx context.Context, caller Caller, raw json.RawMessage) map[string]any {
