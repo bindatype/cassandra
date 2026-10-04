@@ -13,28 +13,16 @@ import (
 	"github.com/bindatype/cassandra/internal/connector"
 )
 
-// A policy says which resources a host offers. It cannot say which operations
-// that host's agent actually implements, and the two drift: an agent upgraded
-// on one host and not another leaves the policy advertising a capability that
-// does not exist there.
-//
-// That drift was not hypothetical. A policy offered host.uptime on two hosts
-// while only one ran an agent that implemented it. The model was told the
-// capability existed, sent the same request three times against a deterministic
-// "operation is not supported", spent three of its five turns on it, and then
-// reported a failure for a resource it had never requested. Nothing in that
-// chain was wrong except the advertisement.
-//
-// The agent can be asked. So it is asked, and a request for something a host
-// cannot do is refused here -- naming what that host does offer, so the next
-// attempt is informed rather than a repeat.
+// A policy says which resources a host offers, not which operations its agent
+// implements, and the two drift when agents are upgraded unevenly. So the
+// agent is asked, and a request it can't serve is refused here, naming what
+// the host does offer, so the next attempt is informed rather than a repeat.
 
 const agentProbeTimeout = 5 * time.Second
 
-// agentCapabilities is one host's answer, including the case where there was
-// no answer. Unreachable and "does not implement it" are different facts and
-// must not collapse into one: the first is a transport problem that may clear,
-// the second is a property of what is installed there.
+// agentCapabilities is one host's answer, including no answer. Unreachable (a
+// transport problem that may clear) and "does not implement it" (a property
+// of what is installed) are kept distinct.
 type agentCapabilities struct {
 	operations map[string]bool
 	reachable  bool
@@ -50,9 +38,8 @@ func (a agentCapabilities) offered() []string {
 	return names
 }
 
-// probeAgents asks each host's agent which operations it has enabled. Hosts are
-// probed in parallel under one deadline, because a single unreachable host must
-// not delay a question that does not concern it.
+// probeAgents asks each host's agent which operations it has enabled, in
+// parallel under one deadline, so one unreachable host can't delay the rest.
 func probeAgents(ctx context.Context, executor *connector.Executor, hosts []string) map[string]agentCapabilities {
 	found := make(map[string]agentCapabilities, len(hosts))
 	if executor == nil || len(hosts) == 0 {
@@ -106,9 +93,8 @@ func probeOneAgent(ctx context.Context, executor *connector.Executor, host strin
 }
 
 // operationsFromEvidence pulls the operation names out of a capabilities
-// response. An agent that answers without naming any operation is treated as
-// unreadable rather than as offering nothing, because "it told us nothing" and
-// "it told us it can do nothing" would otherwise be the same result.
+// response. A response naming no operation is treated as unreadable, not as
+// "offers nothing".
 func operationsFromEvidence(evidence connector.Evidence) (map[string]bool, error) {
 	raw, err := json.Marshal(evidence.Data)
 	if err != nil {
@@ -137,11 +123,9 @@ func operationsFromEvidence(evidence connector.Evidence) (map[string]bool, error
 // checkPlanAgainstAgents reports why a plan cannot run on the host it names, or
 // nil if nothing is known to stand in the way.
 //
-// It refuses only on a positive answer -- the agent replied and did not list
-// the operation. An unprobed or unreachable host is allowed through to fail on
-// its own terms, because refusing on missing knowledge would turn every
-// transport blip into "this host cannot do that", which is the confusion this
-// whole mechanism exists to prevent.
+// It refuses only when the agent replied and did not list the operation. An
+// unprobed or unreachable host is let through to fail on its own terms;
+// otherwise every transport blip would read as "this host cannot do that".
 func checkPlanAgainstAgents(plan broker.RoutePlan, known map[string]agentCapabilities) error {
 	if len(known) == 0 {
 		return nil

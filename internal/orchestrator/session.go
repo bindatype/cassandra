@@ -56,9 +56,10 @@ func PromptRules() []string {
 
 const (
 	toolName = "cass_evidence"
-	// Headroom above what any connector will return, so evidence is rejected
-	// here only if a connector's own bound has failed. CASS_MAX_EVIDENCE
-	// raises it in step with a raised connector cap.
+	// The per-result evidence cap. Connector caps sit below it, so it fires
+	// only when a connector's own bound has failed, and an oversized result
+	// is discarded whole. CASS_MAX_EVIDENCE raises it in step with a raised
+	// connector cap.
 	maxEvidenceJSON = 64 * 1024
 
 	// maxToolCalls bounds the work, not the authority: each call is validated
@@ -66,47 +67,20 @@ const (
 	// schema, run a query, and correct it once.
 	maxToolCalls = 5
 
-	// servedContextTokens is what the gateway actually serves, measured rather
-	// than read from configuration -- the two disagreed for a month.
-	//
-	// Measured against gemma4-31b-vllm by scripts/ctx_marker_probe.py, which
-	// plants a marker at the head, the middle, and the tail of an oversized
-	// prompt and asks which survived. All three were reported at every size up
-	// to 127,500 served tokens; 140,000 was refused outright with HTTP 400,
-	// "This model's maximum context length is 131072 tokens".
-	//
-	// That refusal is the important half. The previous backend, gemma4:31b on
-	// ollama behind MindRouter, served 32,768 and did not refuse: it discarded
-	// the HEAD and kept the tail, so an oversized request reported only the
-	// last marker. The head is the system prompt, so every safety rule was the
-	// first thing thrown away, silently, exactly when the context was largest.
-	// vLLM fails loudly instead. The guard stays because a refusal with a
-	// stated reason still beats a 400 in the user's face, and because nothing
-	// stops an ollama-backed model being registered here again.
-	//
-	// Re-measure after any gateway or model change. That instruction is not
-	// decoration: this constant was 32,768 and correct until the backend moved.
+	// servedContextTokens is the context gemma4-31b-vllm was measured to serve
+	// by scripts/ctx_marker_probe.py on 2026-09-04, not read from config. The
+	// gateway has reported 244,000 since vLLM's max-model-len was raised;
+	// that is not yet re-measured, and a low value errs safe. vLLM refuses an
+	// oversized request with HTTP 400; an ollama backend instead silently
+	// drops the head of the request, which is the system prompt. roomForMore
+	// covers both. Re-measure after any gateway or model change.
 	servedContextTokens = 131072
 
-	// Two ratios, because one is wrong for half the content. Both are measured
-	// against the served tokenizer and both are rounded DOWN past the densest
-	// sample seen, so the estimate runs high: refusing early is recoverable,
-	// overshooting the window is not.
-	//
-	// Rounding down is the whole discipline, and it was got wrong once. These
-	// were 2.5 and 4.3, taken from a single sample each; re-measuring across
-	// three live intents found evidence denser than 2.5 and prose denser than
-	// 4.3, which made the guard optimistic in the one direction it must never
-	// be. Take the worst case, not the average.
-	//
-	// jsonCharsPerToken: live evidence measured 2.27 (fleet.inventory, 23,232
-	// chars), 2.59 (tickets.open, 36,664) and 2.73 (monitoring.problems,
-	// 9,273). The densest governs. Structured JSON is thick with punctuation,
-	// and the more uniform the records the worse it gets.
-	//
-	// proseCharsPerToken: the 29,420-byte prompt measured 7,261 tokens, which
-	// is 4.05. Using the JSON figure for prose would overstate it by 84% and
-	// leave no room for evidence that in fact fits.
+	// Characters per token, measured against the served tokenizer: JSON
+	// evidence and prose differ by nearly 2x. Both are rounded down past the
+	// densest sample measured, so the estimate runs high; refusing early is
+	// recoverable, overshooting is not. Take the worst case, never the
+	// average.
 	jsonCharsPerToken  = 2.2
 	proseCharsPerToken = 4.0
 
@@ -116,8 +90,8 @@ const (
 )
 
 // ToolDefinition is the single tool exposed to the model. Its schema is the
-// entire surface a model can influence: an intent, and optionally a host or
-// resource alias. Everything else about execution is resolved by policy.
+// entire surface a model can influence: an intent plus its optional
+// selectors. Everything else about execution is resolved by policy.
 func ToolDefinition(intents []string) any {
 	return toolDefinition(intents, nil, nil)
 }
@@ -125,11 +99,9 @@ func ToolDefinition(intents []string) any {
 // toolDefinition builds the schema, naming the live targets the policy
 // authorizes when there are any.
 //
-// The enum goes on resource and not on host. A resource alias means something
-// only to live.evidence, so a closed set is exactly right. A host is also a
-// Wazuh agent name and an RT subject, where any hostname the estate contains
-// is legitimate -- an enum there would refuse agent.status for every host that
-// happens not to run an endpoint agent.
+// The enum goes on resource, not host: a resource alias means something only
+// to live.evidence, but a host is also a Wazuh agent name and an RT subject,
+// and an enum there would refuse hosts with no endpoint agent.
 func toolDefinition(intents, liveHosts, liveResources []string) any {
 	definition := map[string]any{
 		"type": "function",
@@ -179,6 +151,34 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 							"agent.status, or live.evidence, which report current state and refuse a bound rather than " +
 							"ignore it. A question about what is wrong NOW takes no bound, whatever time it mentions.",
 					},
+					"owner": map[string]any{
+						"type": "string",
+						"description": "For tickets.open and tickets.for_host only: one Request Tracker owner login exactly " +
+							"as evidence shows it (an @gwu.edu address), or Nobody for unowned tickets. One owner per " +
+							"call. With an owner and no since, that owner's oldest tickets come first; add no until for that.",
+					},
+					"order": map[string]any{
+						"type": "string",
+						"enum": []string{broker.TicketOrderOldestFirst, broker.TicketOrderNewestFirst},
+						"description": "For tickets.open and tickets.for_host only: which end of the matching tickets " +
+							"a truncated page shows. Omit it and the bound decides (until: oldest first; since: newest " +
+							"first). Set oldest_first for \"the oldest tickets created in the last N days\": since: Nd " +
+							"with order: oldest_first.",
+					},
+					"queues": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+						"description": "For tickets.open and tickets.for_host only: search just these Request Tracker " +
+							"queues, one name per item, e.g. [\"rtshelp\", \"hpchelp\"]. Omit for every allowlisted " +
+							"queue. A question that names queues sets this; never filter a page of all queues yourself.",
+					},
+					"status": map[string]any{
+						"type": "string",
+						"enum": []string{broker.TicketStatusActive},
+						"description": "For tickets.open and tickets.for_host only. Omit for new, open and stalled. " +
+							"Set active when the question says \"active\": RT's __Active__, which follows each queue's " +
+							"own lifecycle and can include statuses other than those three.",
+					},
 					"match": map[string]any{
 						"type": "string",
 						"description": "Narrow monitoring evidence to problems whose name contains this text, " +
@@ -222,9 +222,9 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 
 // Session runs one question through the model, the broker, and back.
 type Session struct {
-	// agentOps is what each live host's agent reported it can do, when asked.
-	// A host absent from this map was never probed, which is not the same as a
-	// host that answered and offered nothing.
+	// agentOps is what each live host's agent reported it can do. A host
+	// absent from the map was never probed, which is not the same as one that
+	// offered nothing.
 	agentOps map[string]agentCapabilities
 
 	client   *MindRouterClient
@@ -233,18 +233,34 @@ type Session struct {
 	intents  []string
 	auditor  *Auditor
 	model    string
+	caller   string
+	agent    string
 	trace    []TraceEntry
 	event    AuditEvent
 	started  time.Time
+	// evidence is every result that reached the model, for callers that want
+	// the figures as data rather than retyped in prose.
+	evidence []connector.Result
 }
 
-// WithAudit attaches an audit destination. Without one the session still works
-// but leaves no record, which is the state this replaced.
+// WithAudit attaches an audit destination. Without one the session works but
+// leaves no record.
 func (s *Session) WithAudit(auditor *Auditor, model string) *Session {
 	s.auditor = auditor
 	s.model = model
 	return s
 }
+
+// WithCaller records who asked and through which agent, for a service that
+// answers for many people. Both are empty for a local askcass run.
+func (s *Session) WithCaller(person, client string) *Session {
+	s.caller = person
+	s.agent = client
+	return s
+}
+
+// Evidence returns every result the model was given while answering.
+func (s *Session) Evidence() []connector.Result { return s.evidence }
 
 // TraceEntry records one step of the loop so an operator can see exactly what
 // the model proposed and what policy did with it.
@@ -256,10 +272,8 @@ type TraceEntry struct {
 
 // NewSession wires a model client to a policy router and an executor.
 //
-// Only intents whose source the executor can actually reach are offered to the
-// model. Advertising an intent with no connector behind it presents a
-// capability that does not exist, which is the same failure as answering a
-// question from a source that cannot see it.
+// Only intents whose source the executor can reach are offered to the model.
+// intentIsOffered enforces the same list.
 func NewSession(client *MindRouterClient, router *broker.Router, executor *connector.Executor) *Session {
 	available := make(map[broker.Source]bool)
 	for _, source := range executor.Sources() {
@@ -274,14 +288,10 @@ func NewSession(client *MindRouterClient, router *broker.Router, executor *conne
 	return &Session{client: client, router: router, executor: executor, intents: intents}
 }
 
-// ReconcileAgents asks every live endpoint agent what it actually implements,
-// so a request for something a host cannot do is refused with that host's real
-// capability list rather than sent and left to fail opaquely.
-//
-// It is called explicitly rather than from NewSession because it costs a round
-// trip per live host, and a caller that only plans, or only asks a question no
-// endpoint can answer, should not pay for it. Skipping it is safe: every check
-// downstream treats "not probed" as "no opinion".
+// ReconcileAgents asks every live endpoint agent what it implements, so a
+// request a host can't serve is refused with that host's real capability list
+// instead of failing opaquely. It costs a round trip per host, so callers opt
+// in; skipping it is safe, since "not probed" means "no opinion" downstream.
 func (s *Session) ReconcileAgents(ctx context.Context) {
 	hosts, _ := s.router.LiveTargets()
 	s.agentOps = probeAgents(ctx, s.executor, hosts)
@@ -295,24 +305,9 @@ func (s *Session) Trace() []TraceEntry {
 	return s.trace
 }
 
-// Ask answers a question, letting the model work in steps.
-//
-// It gets several tool calls rather than one. A single call forces every
-// question into a single query, which is the wrong shape for the work: asked
-// about an unfamiliar table the model reaches for information_schema, and with
-// one call that inspection consumes the only turn it had. It would report the
-// columns and stop, having never answered. Given room, it can look before it
-// queries, count before it aggregates, and correct a query the database
-// rejected -- which is how a person would do it.
-//
-// Every call is validated and authorized independently. More turns is more
-// opportunity to work, not more authority.
-// estimatedTokens is a deliberately pessimistic size for what will be sent.
-//
-// There is no tokenizer here, so this counts characters and divides by the
-// densest ratio measured. It exists to keep the request under a limit whose
-// breach is silent, and a guard against a silent failure has to err toward
-// refusing early.
+// estimatedTokens is a deliberately pessimistic size for what will be sent:
+// characters divided by the densest ratio measured, since there is no
+// tokenizer here. It errs toward refusing early.
 func estimatedTokens(messages []Message, tools []any) int {
 	tokens := 0
 	for _, m := range messages {
@@ -334,18 +329,15 @@ func estimatedTokens(messages []Message, tools []any) int {
 	return tokens + answerReserveTokens
 }
 
-// roomForMore reports whether another payload of this size can be added
-// without the gateway silently discarding the head of the request.
+// roomForMore reports whether another payload of this size still fits the
+// served context.
 func roomForMore(messages []Message, tools []any, addition int) (int, bool) {
 	projected := estimatedTokens(messages, tools) + int(float64(addition)/jsonCharsPerToken)
 	return projected, projected <= servedContextTokens
 }
 
-// discloseWithheldEvidence appends the limitation when the model did not.
-//
-// Every mechanism in this project that expressed an absence by omission has
-// been read the reassuring way. A partial answer that does not say it is
-// partial is the same failure with a new cause.
+// discloseWithheldEvidence appends the limitation when the model did not
+// state it: a partial answer that doesn't say so reads as complete.
 func discloseWithheldEvidence(answer string, withheld bool) string {
 	if !withheld {
 		return answer
@@ -360,13 +352,20 @@ func discloseWithheldEvidence(answer string, withheld bool) string {
 		"returning it would have exceeded the model's context. Ask a narrower question to see the rest."
 }
 
+// Ask answers a question, letting the model work in up to maxToolCalls steps,
+// so it can inspect a schema, query, and correct a rejected query. Every call
+// is validated and authorized independently: more turns is more room to work,
+// not more authority.
 func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 	s.trace = nil
+	s.evidence = nil
 	s.started = time.Now()
 	s.event = AuditEvent{
 		RequestID: newRequestID(),
 		Question:  question,
 		Model:     s.model,
+		Caller:    s.caller,
+		Client:    s.agent,
 		Decision:  "no_tool_call",
 		Status:    "answered",
 	}
@@ -376,20 +375,15 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: question},
 	}
-	// Built per session rather than once, because it depends on the policy
-	// this session was constructed with.
+	// Built per session: it depends on this session's policy.
 	liveHosts, liveResources := s.router.LiveTargets()
 	tools := []any{toolDefinition(s.intents, liveHosts, liveResources)}
 
 	forceTool := ""
 	budgetReached := false
 
-	// What each turn actually did. Without this the only thing the loop could
-	// say on the way out was its own constant: "gave up after 5 tool calls",
-	// whether it had spent five turns on five different theories or three of
-	// them re-submitting one query that had already failed twice. Those need
-	// different responses from whoever reads the message, so the message has
-	// to tell them apart.
+	// How the turns were spent, so a turn-limit failure can say whether the
+	// model was exploring or repeating one failing query.
 	succeeded, failed := 0, 0
 	seenFailure := map[string]string{}
 	seenError := map[string]bool{}
@@ -404,15 +398,11 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		if len(choice.Message.ToolCalls) == 0 {
 			answer := strings.TrimSpace(choice.Message.Content)
 
-			// A weaker model sometimes writes out the call it means to make --
-			// the SQL, the arguments, sometimes a code block -- and stops,
-			// having described the action instead of taking it. Returning that
-			// hands the caller a plan where an answer should be. With turns
-			// left, ask again.
+			// A model sometimes writes out the call it means to make and
+			// stops. With turns left, force the call: the next turn names the
+			// function in tool_choice, so a call is the only shape the
+			// response can take.
 			if describesACallInstead(answer) && turn < maxToolCalls-1 {
-				// Asking again in prose is what failed the first time. The next
-				// turn names the function in tool_choice, so a call is the only
-				// shape the response can take.
 				s.record("described_instead_of_called", "model wrote out a tool call rather than making one; forcing the call", false)
 				messages = append(messages,
 					Message{Role: "assistant", Content: answer},
@@ -432,16 +422,10 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			} else {
 				s.record("answer_synthesized", "", true)
 			}
-			// No intent was used and none failed: the model looked at what it
-			// could reach and judged that none of it applied. That is the only
-			// case where the documentation is consulted, and it is exactly
-			// where the answer would otherwise be "the available evidence
-			// source does not cover that question".
-			//
-			// The two exclusions are the whole safety of this. succeeded > 0
-			// means a measurement exists and prose must not displace it.
-			// failed > 0 means an evidence call broke, and answering from
-			// documentation would hide the breakage behind a fluent paragraph.
+			// The documentation is consulted only when no call succeeded and
+			// none failed, i.e. the model judged no source applied. With
+			// evidence in hand, prose must not displace it; after a failure,
+			// a fluent paragraph would hide the breakage.
 			if succeeded == 0 && failed == 0 {
 				if fromDocs, docErr := s.answerFromDocs(ctx, question); docErr == nil {
 					s.record("answered_from_documentation",
@@ -451,16 +435,13 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 					s.event.AnswerChars = len(fromDocs)
 					return fromDocs, nil
 				} else {
-					// The model's own answer stands. A failed lookup must not
-					// cost the user the answer they would have had.
+					// The model's own answer stands.
 					s.record("documentation_lookup_failed", docErr.Error(), false)
 				}
 			}
 
-			// A result was withheld to keep the request inside the context.
-			// The model was told to say so; if it did not, the answer says it
-			// anyway. This is a fact about what was gathered, not a claim
-			// about the subject, and an answer that omits it reads as complete.
+			// If a result was withheld for context and the model didn't say
+			// so, the answer says it anyway.
 			answer = discloseWithheldEvidence(answer, budgetReached)
 
 			s.event.Answer = answer
@@ -478,33 +459,19 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			s.event.Proposed = call.Function.Arguments
 		}
 
-		// The model's arguments are untrusted input on every turn, not just the
-		// first. They are decoded as strictly as any route request and
-		// authorized by policy before anything executes.
+		// The model's arguments are untrusted on every turn: runOneCall
+		// decodes them strictly and authorizes them before anything executes.
 		messages = append(messages, Message{
 			Role: "assistant", Content: choice.Message.Content, ToolCalls: choice.Message.ToolCalls,
 		})
 
 		result, failure := s.runOneCall(ctx, call)
 		if failure != nil {
-			// A refusal is an answer, but only while there is nothing else to
-			// say. Asked what kernel winston runs, the model fetched host
-			// facts, got them, then speculatively asked for a resource
-			// authorized on a different host -- and that denial discarded the
-			// evidence already in hand and failed the whole question. The
-			// policy did its job both times; the loop threw away the half that
-			// worked.
-			//
-			// So a refusal still ends the loop when it is all that happened:
-			// someone who asks for something forbidden should be told, not
-			// given a vague answer assembled around it. Once evidence has been
-			// collected, the refusal becomes a correctable mistake like any
-			// other, and the model answers from what it has and says what it
-			// could not get.
-			//
-			// Nothing is loosened by this. The broker refused the call; the
-			// only question is whether the refusal also destroys unrelated
-			// work that was already authorized and already done.
+			// A refusal ends the loop only when nothing has been collected yet:
+			// someone who asks for something forbidden should be told so.
+			// After evidence has been collected, a refused follow-up call must
+			// not discard it; the model answers from what it has and says
+			// what it could not get. The broker still refused the call.
 			if !failure.recoverable && succeeded == 0 {
 				s.event.Decision = "denied"
 				return "", failure.err
@@ -516,11 +483,8 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			failed++
 			lastError = failure.err.Error()
 
-			// A failed attempt spends a turn, so it is the reason a question
-			// runs out of them. Recording only successes made the audit for a
-			// five-turn failure show two calls and no explanation, and the
-			// only way to find out what the other three were was to run the
-			// question again with -trace and hope it failed the same way.
+			// Failed attempts are audited too: they are what a question runs
+			// out of turns on.
 			attemptedQuery := queryFromArguments(call.Function.Arguments)
 			s.event.Calls = append(s.event.Calls, AuditCall{
 				Source: "orchestrator",
@@ -529,21 +493,10 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 				Error:  lastError,
 			})
 
-			// Feeding back the same "correct this and call again" to a model
-			// that has already made this exact mistake invites the same fix.
-			// It happened: one question spent turns 1, 2 and 5 on
-			// PERCENTILE_CONT(x) OVER () -- rejected each time by MariaDB for
-			// want of WITHIN GROUP (ORDER BY ...) -- and turn 5 was turn 1
-			// again. Naming the repeat is cheap and is the difference between
-			// a turn spent re-deriving and a turn spent elsewhere.
-			//
-			// Two signals, because the query text alone missed the case that
-			// prompted this. Turns 1 and 4 of one failed question were the
-			// same construction differing only by a DISTINCT, so comparing
-			// query text saw two different queries while the database saw one
-			// mistake twice. The error is the better discriminator: an
-			// identical error means the construction is wrong, not the
-			// spelling, and re-sending a variant of it cannot help.
+			// Name a repeat instead of feeding back the same "correct this"
+			// to a model that already made this mistake. Two signals: the same
+			// query, or a different query with an error already seen (the
+			// construction is wrong, not the spelling).
 			guidance := "Correct this and call the tool again."
 			if previous, repeat := seenFailure[normalizeQuery(attemptedQuery)]; repeat {
 				guidance = "You have already sent this exact query in this " +
@@ -575,12 +528,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			return "", fmt.Errorf("encode evidence: %w", err)
 		}
 		if len(evidenceJSON) > evidenceBudget() {
-			// Recorded, because it was not. An oversized result was discarded
-			// with no trace entry at all: the trace showed intent_proposed,
-			// policy_allowed, and then nothing -- a call that was authorized
-			// and then stopped existing. Debugging it meant measuring the
-			// agent's response by hand to discover the result had been thrown
-			// away for being 101 KB against a 64 KB cap.
+			// Traced, so an authorized call doesn't silently vanish.
 			s.record("evidence_too_large",
 				fmt.Sprintf("%d bytes exceeds the %d-byte per-result cap; the whole result was discarded, not truncated",
 					len(evidenceJSON), evidenceBudget()), false)
@@ -591,12 +539,10 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			continue
 		}
 
-		// The per-result cap says nothing about the total. Every result stays
-		// in the history, so five of them are sent together on the last turn,
-		// and the gateway responds to an oversized request by discarding the
-		// head rather than refusing it. Refusing here is the difference between
-		// an answer that says what it is missing and one that quietly lost its
-		// own instructions.
+		// The per-result cap says nothing about the total: every result stays
+		// in the history and is resent each turn. Withholding here gives an
+		// answer that says what it is missing, rather than a gateway 400 or,
+		// on an ollama backend, a request whose head was silently dropped.
 		if projected, ok := roomForMore(messages, tools, len(evidenceJSON)); !ok {
 			s.record("evidence_withheld_for_context",
 				fmt.Sprintf("adding %d bytes would reach about %d tokens against a served limit of %d",
@@ -613,6 +559,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		}
 
 		succeeded++
+		s.evidence = append(s.evidence, result)
 		s.record("evidence_collected", fmt.Sprintf("%d source(s)", len(result.Evidence)), true)
 		for _, evidence := range result.Evidence {
 			s.event.Calls = append(s.event.Calls, AuditCall{
@@ -631,10 +578,8 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		})
 	}
 
-	// "gave up after 5 tool calls" named the limit rather than the run, which
-	// reads as "the limit is too low" no matter what actually went wrong. Say
-	// how the turns were spent instead, so the next question is the right one:
-	// raise the limit, fix the query, or look at the source.
+	// Say how the turns were spent, not just that the limit was hit, so the
+	// reader knows whether to fix the query, the source, or the limit.
 	detail := fmt.Sprintf("%d succeeded, %d failed", succeeded, failed)
 	if repeats := failed - len(seenError); repeats > 0 {
 		detail += fmt.Sprintf(", %d of them repeating an error already seen", repeats)
@@ -663,16 +608,9 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: fmt.Errorf("undecodable intent: %w", err), recoverable: true}
 	}
 
-	// The tool description lists only intents this session can reach, but a
-	// list is not a door. A model that names an intent it was never offered --
-	// because it has seen one elsewhere, or inferred it -- gets planned anyway,
-	// and the failure surfaces from the executor as "no connector registered
-	// for source", which reads as an internal fault rather than the
-	// configuration problem it is.
-	//
-	// Observed: a deployment with no CASS_AGENT_CONFIG offers no live.evidence,
-	// the model proposed it regardless, and the user was shown a connector
-	// error they could not act on.
+	// The tool lists only reachable intents, but a model can name one it
+	// wasn't offered. Refuse it here as a configuration fact rather than let
+	// it fail in the executor as "no connector registered".
 	if err := s.intentIsOffered(request.Intent); err != nil {
 		s.record("intent_not_offered", err.Error(), false)
 		if s.event.Decision == "no_tool_call" {
@@ -683,13 +621,18 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: err, recoverable: len(s.intents) > 0}
 	}
 
+	if err := ticketBoundContradiction(s.event.Question, request); err != nil {
+		s.record("bound_contradicts_question", err.Error(), false)
+		if s.event.Decision == "no_tool_call" {
+			s.event.Decision = "denied"
+		}
+		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+
 	plan, err := s.router.Plan(request)
 	if err != nil {
 		s.record("policy_denied", err.Error(), false)
-		// Record the denial even when the model will be allowed another
-		// attempt. A request denied and then retried is not the same as one
-		// that never proposed anything, and "no_tool_call" says the wrong
-		// thing about a model that proposed an intent that does not exist.
+		// Record the denial even when the model gets another attempt.
 		if s.event.Decision == "no_tool_call" {
 			s.event.Decision = "denied"
 		}
@@ -705,10 +648,9 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 	s.event.Decision = "allowed"
 	s.event.Plan = planJSON
 
-	// Policy says this host offers the resource; the agent is what decides
-	// whether it can serve it. Asking here converts an opaque execution
-	// failure, which a model retries verbatim, into a refusal that names what
-	// the host does offer.
+	// Policy says the host offers the resource; the agent decides whether it
+	// can serve it. Checking first turns an opaque failure, which a model
+	// retries verbatim, into a refusal naming what the host does offer.
 	if err := checkPlanAgainstAgents(plan, s.agentOps); err != nil {
 		s.record("agent_lacks_operation", err.Error(), false)
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
@@ -740,8 +682,8 @@ func (s *Session) writeAudit() {
 		}
 	}
 	if err := s.auditor.Record(s.event); err != nil {
-		// Deliberately visible. An audit that fails quietly is worse than none,
-		// because it invites the belief that a record exists.
+		// Deliberately loud: a quietly failed audit invites the belief that a
+		// record exists.
 		fmt.Fprintf(os.Stderr, "cass: AUDIT WRITE FAILED: %v\n", err)
 	}
 }
@@ -762,17 +704,17 @@ func (s *Session) record(stage, detail string, allowed bool) {
 }
 
 // isRetryableRouteError reports whether a denial describes a malformed request
-// rather than a refused one. Authorization outcomes are never retried: putting
-// a value in the wrong field is a mistake the model can fix, while being told a
-// host is not authorized is an answer, and offering another attempt would turn
-// a refusal into an invitation to look for a host that is.
+// (which the model may fix) rather than an authorization refusal (which is an
+// answer; retrying would invite a search for a host that is authorized).
 func isRetryableRouteError(err error) bool {
 	var routeErr *broker.RouteError
 	if !errors.As(err, &routeErr) {
 		return false
 	}
 	switch routeErr.Code {
-	case "invalid_request", "invalid_query", "invalid_since", "invalid_host", "invalid_resource",
+	case "invalid_request", "invalid_query", "invalid_since", "invalid_until", "missing_since",
+		"invalid_limit", "invalid_match", "invalid_severity", "invalid_state",
+		"invalid_host", "invalid_owner", "invalid_queue", "invalid_resource",
 		"missing_host", "missing_resource", "unknown_intent":
 		return true
 	default:
@@ -781,10 +723,8 @@ func isRetryableRouteError(err error) bool {
 }
 
 // describesACallInstead reports whether an answer looks like a tool call that
-// was written out rather than issued. It is a heuristic over model prose, so
-// it errs toward letting text through: the cost of a false positive is one
-// wasted turn, while a false negative returns a plan to someone who asked a
-// question.
+// was written out rather than issued. A heuristic: a false positive costs one
+// turn, a false negative returns a plan instead of an answer.
 func describesACallInstead(answer string) bool {
 	if answer == "" {
 		return false
@@ -809,9 +749,9 @@ func describesACallInstead(answer string) bool {
 	return mentionsTheCall || announces
 }
 
-// evidenceBudget is the largest evidence payload this session will hand a
-// model. It tracks the connector caps: raising one without the other produces
-// a query that succeeds and is then refused.
+// evidenceBudget is the largest single result this session hands the model.
+// Raise it together with any connector cap, or a query succeeds and is then
+// discarded.
 func evidenceBudget() int {
 	if value := env.Get("CASS_MAX_EVIDENCE"); value != "" {
 		if size, err := strconv.Atoi(value); err == nil && size > 0 {
@@ -821,10 +761,8 @@ func evidenceBudget() int {
 	return maxEvidenceJSON
 }
 
-// queryFromArguments pulls the SQL out of a tool call for the record. The
-// arguments are the model's, so they may not parse; an unparsable call is
-// still worth recording verbatim, because "the model sent something that was
-// not JSON" is itself the finding.
+// queryFromArguments pulls the SQL out of a tool call for the record, or
+// returns the arguments verbatim when they don't parse.
 func queryFromArguments(arguments string) string {
 	var parsed struct {
 		Query string `json:"query"`
@@ -835,11 +773,8 @@ func queryFromArguments(arguments string) string {
 	return parsed.Query
 }
 
-// normalizeQuery collapses whitespace and case so that the same query sent
-// twice is recognised as the same query. It is deliberately loose: the point
-// is to catch a model re-deriving an identical mistake through slightly
-// different formatting, not to decide SQL equivalence, which is not something
-// string comparison can do.
+// normalizeQuery collapses whitespace and case so a re-sent query is
+// recognised despite formatting. It does not attempt SQL equivalence.
 func normalizeQuery(query string) string {
 	return strings.ToLower(strings.Join(strings.Fields(query), " "))
 }
@@ -856,9 +791,8 @@ func hostSchema(liveHosts []string) map[string]any {
 }
 
 // resourceSchema closes the field to the aliases the policy defines. With none
-// defined the field stays open, because an empty enum is a schema that permits
-// nothing and would be a confusing way to say "no endpoint agent is
-// configured" -- the intent is withheld entirely in that case anyway.
+// it stays open (an empty enum permits nothing); live.evidence is withheld
+// entirely in that case anyway.
 func resourceSchema(liveResources []string) map[string]any {
 	schema := map[string]any{
 		"type":        "string",
@@ -875,8 +809,7 @@ func resourceSchema(liveResources []string) map[string]any {
 // intentIsOffered reports whether this session advertised the intent, naming
 // what it did advertise when it did not.
 //
-// This is the enforcing half of the filter in NewSession. That filter decides
-// what the model is told exists; without this, nothing decides what it may
+// NewSession decides what the model is told exists; this decides what it may
 // actually ask for.
 func (s *Session) intentIsOffered(intent broker.Intent) error {
 	for _, offered := range s.intents {

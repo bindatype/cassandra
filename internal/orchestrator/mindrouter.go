@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	// A cold load of a large model on an idle GPU can exceed two minutes, and
-	// scoring that as a failure hides a working model behind a client defect.
+	// A cold model load on an idle GPU can take over two minutes.
 	defaultTimeout   = 300 * time.Second
 	maxResponseBytes = 1 << 20
 )
@@ -35,6 +34,11 @@ type MindRouterConfig struct {
 	Model            string
 	Timeout          time.Duration
 	MaxResponseBytes int64
+	// Thinking asks the chat template for a reasoning phase (Gemma 4 reads
+	// enable_thinking). ThinkingBudget caps it; vLLM enforces the cap, but
+	// MindRouter dropped the field when measured on 2026-10-01.
+	Thinking       bool
+	ThinkingBudget int
 }
 
 // MindRouterClient speaks the OpenAI-compatible chat completions surface.
@@ -43,6 +47,8 @@ type MindRouterClient struct {
 	apiKey           string
 	model            string
 	maxResponseBytes int64
+	thinking         bool
+	thinkingBudget   int
 	client           *http.Client
 }
 
@@ -79,6 +85,8 @@ func NewMindRouterClient(config MindRouterConfig) (*MindRouterClient, error) {
 		apiKey:           config.APIKey,
 		model:            config.Model,
 		maxResponseBytes: maxBytes,
+		thinking:         config.Thinking,
+		thinkingBudget:   config.ThinkingBudget,
 		client:           &http.Client{Timeout: timeout},
 	}, nil
 }
@@ -118,21 +126,22 @@ type completionResponse struct {
 }
 
 // Complete sends one chat completion request and returns the first choice.
-// forceTool names a function the model must call. Empty leaves the choice to
-// the model, which is what allows it to decline a question no source can
-// answer.
+// forceTool names a function the model must call; empty leaves the choice to
+// the model, so it can decline a question no source can answer.
 //
-// Note that MindRouter does not currently honour this. Measured on
-// 2026-08-27, a request naming a function by name still returned
-// finish_reason "stop" with no tool call, for every model tried. The field is
-// sent because it is the correct request to make and other gateways respect
-// it, but nothing here should be written as though a call were guaranteed:
-// the caller must still handle a response that describes a call instead of
-// making one.
+// gemma4-31b-vllm honours a forced call (measured 2026-10-02); the ollama
+// models behind MindRouter did not (2026-08-27). Callers must still handle a
+// response that describes a call instead of making one.
 func (c *MindRouterClient) Complete(ctx context.Context, messages []Message, tools []any, forceTool string) (Choice, error) {
 	body := map[string]any{
 		"model":    c.model,
 		"messages": messages,
+	}
+	if c.thinking {
+		body["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
+		if c.thinkingBudget > 0 {
+			body["thinking_token_budget"] = c.thinkingBudget
+		}
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools

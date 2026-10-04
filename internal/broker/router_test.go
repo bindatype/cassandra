@@ -2,6 +2,7 @@ package broker
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -702,5 +703,125 @@ func TestUnroutableOperationSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not broker-routable") {
 		t.Errorf("misleading error for an unroutable operation: %v", err)
+	}
+}
+
+func TestOwnerFilterIsOneLoginOnTicketIntentsOnly(t *testing.T) {
+	router := newTestRouter(t)
+	cases := []struct {
+		name     string
+		request  RouteRequest
+		wantCode string
+	}{
+		{"tickets.open with an owner", RouteRequest{Intent: IntentTicketsOpen, Owner: "aklwong@gwu.edu"}, ""},
+		{"unowned tickets", RouteRequest{Intent: IntentTicketsOpen, Owner: "Nobody"}, ""},
+		{"tickets.for_host with an owner", RouteRequest{Intent: IntentTicketsByHost, Host: "dss01", Owner: "jcreech@gwu.edu"}, ""},
+		{"not a ticket intent", RouteRequest{Intent: IntentFleetInventory, Owner: "aklwong@gwu.edu"}, "invalid_request"},
+		{"several owners in one call", RouteRequest{Intent: IntentTicketsOpen, Owner: "aklwong@gwu.edu, jcreech@gwu.edu"}, "invalid_owner"},
+		{"a quote", RouteRequest{Intent: IntentTicketsOpen, Owner: "x' OR Owner = 'y"}, "invalid_owner"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := router.Plan(tc.request)
+			if tc.wantCode == "" {
+				if err != nil {
+					t.Fatalf("Plan() error = %v", err)
+				}
+				if plan.Steps[0].Owner != tc.request.Owner {
+					t.Errorf("step owner = %q, want %q", plan.Steps[0].Owner, tc.request.Owner)
+				}
+				return
+			}
+			var routeErr *RouteError
+			if !errors.As(err, &routeErr) || routeErr.Code != tc.wantCode {
+				t.Fatalf("Plan() error = %v, want code %s", err, tc.wantCode)
+			}
+			if tc.wantCode == "invalid_owner" && !strings.Contains(routeErr.Message, "once per owner") {
+				t.Errorf("message %q does not tell the model how to fix it", routeErr.Message)
+			}
+		})
+	}
+}
+
+func TestTicketOrderIsAcceptedOnTicketIntentsOnly(t *testing.T) {
+	router := newTestRouter(t)
+	plan, err := router.Plan(RouteRequest{Intent: IntentTicketsOpen, Since: "365d", Order: TicketOrderOldestFirst})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Steps[0].Order != TicketOrderOldestFirst {
+		t.Errorf("step order = %q, want %q", plan.Steps[0].Order, TicketOrderOldestFirst)
+	}
+	for _, request := range []RouteRequest{
+		{Intent: IntentTicketsOpen, Order: "oldest"},
+		{Intent: IntentFleetInventory, Order: TicketOrderOldestFirst},
+	} {
+		if _, err := router.Plan(request); err == nil {
+			t.Errorf("Plan(%+v) accepted, want invalid_request", request)
+		}
+	}
+}
+
+func TestQueuesAndStatusAreAcceptedOnTicketIntentsOnly(t *testing.T) {
+	router := newTestRouter(t)
+	cases := []struct {
+		name     string
+		request  RouteRequest
+		wantCode string
+	}{
+		{"two queues", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"rtshelp", "hpchelp"}}, ""},
+		{"active status", RouteRequest{Intent: IntentTicketsOpen, Status: TicketStatusActive}, ""},
+		{"both, for one host", RouteRequest{Intent: IntentTicketsByHost, Host: "dss01", Queues: []string{"alerts"}, Status: TicketStatusActive}, ""},
+		{"a queue name with a space", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"Server Admin"}}, ""},
+		{"not a ticket intent", RouteRequest{Intent: IntentFleetInventory, Queues: []string{"rtshelp"}}, "invalid_request"},
+		{"status on a non-ticket intent", RouteRequest{Intent: IntentMonitoringProblems, Status: TicketStatusActive}, "invalid_request"},
+		{"an unknown status", RouteRequest{Intent: IntentTicketsOpen, Status: "open"}, "invalid_request"},
+		{"two queues in one string", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"rtshelp, hpchelp"}}, "invalid_queue"},
+		{"a quote", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"x' OR Queue = 'y"}}, "invalid_queue"},
+		{"a duplicate", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"rtshelp", "RTShelp"}}, "invalid_queue"},
+		{"an empty name", RouteRequest{Intent: IntentTicketsOpen, Queues: []string{""}}, "invalid_queue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := router.Plan(tc.request)
+			if tc.wantCode == "" {
+				if err != nil {
+					t.Fatalf("Plan() error = %v", err)
+				}
+				step := plan.Steps[0]
+				if !reflect.DeepEqual(step.Queues, tc.request.Queues) || step.Status != tc.request.Status {
+					t.Errorf("step carries queues %v status %q, want %v %q", step.Queues, step.Status, tc.request.Queues, tc.request.Status)
+				}
+				if err := router.Verify(plan); err != nil {
+					t.Errorf("Verify() refused a plan this router produced: %v", err)
+				}
+				return
+			}
+			var routeErr *RouteError
+			if !errors.As(err, &routeErr) || routeErr.Code != tc.wantCode {
+				t.Fatalf("Plan() error = %v, want code %s", err, tc.wantCode)
+			}
+		})
+	}
+}
+
+// A plan is a JSON document an executor receives; widening its queues or
+// status after planning must not verify.
+func TestVerifyRefusesAPlanWithEditedQueuesOrStatus(t *testing.T) {
+	router := newTestRouter(t)
+	plan, err := router.Plan(RouteRequest{Intent: IntentTicketsOpen, Queues: []string{"rtshelp"}})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	edited := plan
+	edited.Steps = []RouteStep{plan.Steps[0]}
+	edited.Steps[0].Queues = []string{"rtshelp", "x' OR Queue = 'y"}
+	if err := router.Verify(edited); err == nil {
+		t.Error("Verify() accepted a plan whose queue was edited into TicketSQL")
+	}
+	edited.Steps[0].Queues = plan.Steps[0].Queues
+	edited.Steps[0].Status = "resolved"
+	if err := router.Verify(edited); err == nil {
+		t.Error("Verify() accepted a plan with a status the router never produces")
 	}
 }

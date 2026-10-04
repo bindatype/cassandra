@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+const commandOutputHelperMarker = "emit-command-output"
 
 func withCommandOperations(t *testing.T, table map[string][]commandStep) {
 	t.Helper()
@@ -98,15 +102,35 @@ func TestCommandOperationRefusesSilentEmptySuccess(t *testing.T) {
 }
 
 func TestCommandStepCapsOutputAndSaysSo(t *testing.T) {
-	big := strings.Repeat("x", commandMaxOutput*2)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test executable: %v", err)
+	}
 	result := newCommandService().runCommandStep(context.Background(), commandStep{
-		Label: "flood", Path: "/bin/echo", Args: []string{big},
+		Label: "flood",
+		Path:  executable,
+		Args:  []string{"-test.run=^TestCommandOutputHelper$", "--", commandOutputHelperMarker},
 	})
+	if result.Failed {
+		t.Fatalf("output helper failed: %s", result.Failure)
+	}
 	if !result.Truncated {
 		t.Error("oversized output was not marked truncated")
 	}
 	if len(result.Stdout) > commandMaxOutput {
 		t.Errorf("stdout is %d bytes, over the %d cap", len(result.Stdout), commandMaxOutput)
+	}
+}
+
+// TestCommandOutputHelper is run in a child test process so the truncation
+// test does not depend on platform-specific limits for a single argument.
+func TestCommandOutputHelper(t *testing.T) {
+	for _, arg := range os.Args {
+		if arg != commandOutputHelperMarker {
+			continue
+		}
+		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", commandMaxOutput*2))
+		os.Exit(0)
 	}
 }
 
@@ -238,13 +262,25 @@ func TestGrantRequiringCommandsAreNotShippedBlind(t *testing.T) {
 		}
 	}
 
-	// dmesg may be implemented, but must not be enabled by default: the
-	// shipped unit sets ProtectKernelLogs=yes, so a default-on kernel.messages
-	// could only ever refuse.
+	// kernel.messages stays opt-in. The error text below predates the repo
+	// unit's ProtectKernelLogs=no (2026-09-18); kernel.dmesg_restrict=1 can
+	// still block it on a given host. Whether it should now be default-on is
+	// an open decision.
 	for _, name := range defaultEnabledOperations() {
 		if name == operationKernelMessages {
 			t.Errorf("%s is enabled by default, but ProtectKernelLogs=yes in the shipped unit "+
 				"means it can only refuse until that grant is made", name)
+		}
+	}
+
+	// nvidia-smi needs the GPU device nodes visible, and the shipped unit sets
+	// PrivateDevices=yes: no /dev/nvidia* node exists in cassd's private /dev
+	// regardless of nvidia-smi's own permissions. A default-on host.gpu could
+	// only ever refuse until that grant is made.
+	for _, name := range defaultEnabledOperations() {
+		if name == operationHostGPU {
+			t.Errorf("%s is enabled by default, but PrivateDevices=yes in the shipped unit "+
+				"hides every GPU device node, so it can only refuse until that grant is made", name)
 		}
 	}
 }
@@ -273,9 +309,32 @@ func TestDefaultEnabledCommandOperationsNeedNoGrant(t *testing.T) {
 // A limit a reader would otherwise have to discover must travel with the
 // result. A socket list with no process column looks complete.
 func TestOperationsWithHiddenLimitsCarryNotes(t *testing.T) {
-	for _, operation := range []string{operationHostListeners, operationKernelMessages} {
+	for _, operation := range []string{operationHostListeners, operationKernelMessages, operationHostGPU} {
 		if len(operationNotes[operation]) == 0 {
 			t.Errorf("%s has a limit that is invisible in its output but carries no note", operation)
+		}
+	}
+}
+
+// GPU count, memory, and utilization were the explicit ask; a query missing
+// any of them would silently under-report capacity rather than fail loudly.
+func TestGPUQueryAsksForCountMemoryAndUtilization(t *testing.T) {
+	steps := commandOperations[operationHostGPU]
+	if len(steps) != 1 {
+		t.Fatalf("host.gpu has %d steps, want exactly 1", len(steps))
+	}
+	var query string
+	for _, arg := range steps[0].Args {
+		if strings.HasPrefix(arg, "--query-gpu=") {
+			query = arg
+		}
+	}
+	if query == "" {
+		t.Fatal("host.gpu step has no --query-gpu argument")
+	}
+	for _, want := range []string{"index", "memory.total", "memory.used", "memory.free", "utilization.gpu"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("host.gpu query %q is missing %q", query, want)
 		}
 	}
 }

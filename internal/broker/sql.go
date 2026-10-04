@@ -8,29 +8,17 @@ import (
 
 const (
 	maxQueryLen = 8192
-	// maxQueryRows bounds any query the planner authorizes. A model-authored
-	// query against a table of eighteen million rows would otherwise be a
-	// legitimate SELECT that no context window can hold.
+	// maxQueryRows bounds any query the planner authorizes; a valid SELECT
+	// can return millions of rows.
 	maxQueryRows = 5000
 )
 
 // ValidateQuery checks that a model-authored query is a single read.
 //
-// This is deliberately a thin guard rather than a harness. The filesystem
-// reasoning that justifies a bounded operation catalog does not apply here:
-// a filesystem is unbounded and holds secrets, whereas this credential is
-// confined to one schema and cannot write.
-//
-// This once also screened for a list of statement verbs that modify data. That
-// check duplicated a control the server already applies -- the grant answers
-// such a statement with a permission error -- while rejecting legitimate
-// queries on substring matches, since "SELECT last_update FROM folderstats"
-// contains one of them. A guard that blocks real work to repeat a check the
-// database already performs is worse than no guard, so it was removed.
-//
-// What remains is that the statement is singular and reads, so that what gets
-// audited is what actually ran and a second statement cannot hide behind the
-// first.
+// It is deliberately thin: the credential is confined to one schema and
+// cannot write, so the database's grant is the write control, not a verb
+// list here. What it checks is that the statement is a single read (so what
+// is audited is what ran) and two SQL shapes known to compute wrong answers.
 func ValidateQuery(query string) error {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
@@ -52,8 +40,26 @@ func ValidateQuery(query string) error {
 
 	// This server accepts stacked statements, so a trailing second statement
 	// would run unseen by whatever recorded the first.
-	if strings.Contains(strings.TrimRight(trimmed, "; \t\n\r"), ";") {
+	withoutTrailing := strings.TrimRight(trimmed, "; \t\n\r")
+	if strings.Contains(withoutTrailing, ";") {
 		return fmt.Errorf("only a single statement is allowed")
+	}
+
+	if conflictingUngroupedAggregateWindow(withoutTrailing) {
+		return fmt.Errorf("plain aggregate and window function appear in the same SELECT without GROUP BY; " +
+			"the aggregate collapses the input to one row before the window runs, so the window sees one row. " +
+			"Write COUNT/AVG as window functions with OVER (), or compute the aggregate and window calculation " +
+			"in separate query scopes")
+	}
+
+	// Checks read withoutTrailing so a trailing ";" can't hide a column name
+	// ("groupName;" never matched "groupname"). See sql_group_partition.go.
+	if column, ok := conflictingGroupByPartitionColumn(withoutTrailing); ok {
+		return fmt.Errorf("GROUP BY and PARTITION BY both name %q in the same query scope; "+
+			"GROUP BY collapses to one row per group before the window function runs, so "+
+			"PERCENTILE_CONT sees one row per partition and returns it for every percentile "+
+			"requested. Compute the window function over the raw rows in a subquery, then "+
+			"GROUP BY the result in an outer query", column)
 	}
 
 	return nil

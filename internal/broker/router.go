@@ -11,10 +11,9 @@ import (
 const (
 	planVersion         = 1
 	fleetInventoryLimit = 500
-	// ticketSearchLimit bounds an RT ticket search. It is fixed rather than
-	// model-chosen, unlike the monitoring limit: a ticket list is answered by
-	// looking at what is open, not by tallying it, and RT's own total already
-	// tells a reader whether the page is complete.
+	// ticketSearchLimit bounds an RT ticket search. It is fixed, not
+	// model-chosen: RT's own total says whether the page is complete, and the
+	// counts come from RT.
 	ticketSearchLimit = 100
 )
 
@@ -46,9 +45,8 @@ func NewRouter(policy Policy) (*Router, error) {
 }
 
 func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
-	// Normalized once here rather than in each connector, so every source
-	// receives the same instant and a malformed bound is refused at planning
-	// time instead of being interpreted differently by each API.
+	// Normalized once here, so every source gets the same instant and a
+	// malformed bound is refused at planning time.
 	since, err := ParseSince(request.Since, time.Now())
 	if err != nil {
 		return RoutePlan{}, newRouteError("invalid_since", err.Error())
@@ -68,11 +66,9 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		untilValue = until.Format(time.RFC3339)
 	}
 
-	// The monitoring selectors are honoured by the two Zabbix intents and by
-	// nothing else. Silently ignoring them elsewhere is the failure this
-	// codebase keeps finding: a request narrowed by a filter that was never
-	// applied comes back wide, and a wide result read as a narrow one is wrong
-	// in the direction that looks right.
+	// The monitoring selectors apply only to the two Zabbix intents, and are
+	// refused elsewhere rather than ignored: an unapplied filter returns a
+	// wide result that reads as narrow.
 	switch request.Intent {
 	case IntentMonitoringProblems, IntentMonitoringHistory:
 	default:
@@ -83,24 +79,56 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		}
 	}
 
+	if request.Order != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if request.Order != TicketOrderOldestFirst && request.Order != TicketOrderNewestFirst {
+				return RoutePlan{}, newRouteError("invalid_request",
+					fmt.Sprintf("order must be %s or %s", TicketOrderOldestFirst, TicketOrderNewestFirst))
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept order; it applies to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
+	if request.Owner != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if err := validateOwnerSelector(request.Owner); err != nil {
+				return RoutePlan{}, newRouteError("invalid_owner", err.Error())
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept owner; it applies to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
+	if len(request.Queues) > 0 || request.Status != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if err := validateQueueSelectors(request.Queues); err != nil {
+				return RoutePlan{}, newRouteError("invalid_queue", err.Error())
+			}
+			if request.Status != "" && request.Status != TicketStatusActive {
+				return RoutePlan{}, newRouteError("invalid_request", fmt.Sprintf(
+					"status must be %s or omitted; omitted means new, open and stalled", TicketStatusActive))
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept queues or status; they apply to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
 	switch request.Intent {
 	case IntentFleetInventory:
 		if request.Host != "" || request.Resource != "" {
 			return RoutePlan{}, newRouteError("invalid_request", "fleet.inventory does not accept host or resource")
 		}
 		if request.Since != "" || request.Until != "" {
-			// A time bound here is worse than useless, because it is applied to
-			// lastKeepAlive. A disconnected agent has by definition stopped
-			// checking in, so bounding the inventory by recent contact removes
-			// precisely the agents the question is about, and the empty result
-			// reads as good news. Asked "how many agents are disconnected right
-			// now", a model added since: "1s", got four active agents, and
-			// answered "zero agents are disconnected" against a true count of
-			// 52.
-			//
-			// Connection state is current state and has no window. Refusing is
-			// the only safe answer: silently ignoring the bound would leave the
-			// model believing it had asked a narrower question than it had.
+			// Refused: Wazuh applies a time bound to lastKeepAlive, so it
+			// removes exactly the disconnected agents, and the empty result
+			// reads as good news. Connection state has no window.
 			return RoutePlan{}, newRouteError("invalid_request",
 				"fleet.inventory reports current connection state and takes no since or until; "+
 					"a time bound filters on last contact, which hides the disconnected agents")
@@ -116,9 +144,8 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			return RoutePlan{}, newRouteError("invalid_request", "fleet.groups does not accept host or resource")
 		}
 		if request.Since != "" || request.Until != "" {
-			// Group membership is current state, exactly as connection state
-			// is. A bound would filter nothing here and imply a window the
-			// answer does not have.
+			// Group membership is current state; a bound would imply a window
+			// the answer doesn't have.
 			return RoutePlan{}, newRouteError("invalid_request",
 				"fleet.groups reports current group membership and takes no since or until")
 		}
@@ -171,9 +198,8 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 
 	case IntentDatabaseQuery:
 		if request.Host != "" || request.Resource != "" {
-			// Naming the correct field matters: a caller told only what is wrong
-			// has to guess, and a model given this error repeated the same
-			// mistake on retry.
+			// Name the correct field; told only what was wrong, the model
+			// repeated the mistake.
 			return RoutePlan{}, newRouteError("invalid_request",
 				"database.query takes the SQL in the \"query\" field; it does not accept \"host\" or \"resource\"")
 		}
@@ -192,10 +218,8 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		}), nil
 
 	case IntentMonitoringHistory:
-		// The event log, not current trigger state. A question about a past day
-		// cannot be answered from trigger.get, which reports what is wrong now:
-		// May 21st had no triggers whose state last changed that day, and 5011
-		// events.
+		// The event log, not current trigger state, which can't answer for a
+		// past day.
 		if request.Resource != "" {
 			return RoutePlan{}, newRouteError("invalid_request", "monitoring.history does not accept resource")
 		}
@@ -230,18 +254,19 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		if request.Host != "" || request.Resource != "" {
 			return RoutePlan{}, newRouteError("invalid_request", "tickets.open does not accept host or resource")
 		}
-		// Unlike fleet.inventory's connection state or a Zabbix trigger's
-		// last-changed time, a ticket's Created date never moves retroactively:
-		// bounding by it cannot hide a ticket that is still open, only select
-		// which open tickets to look at. So since/until are honoured here, filtered
-		// on Created, to answer "how many old open tickets" with RT's own exact
-		// count rather than a model counting dates off a truncated page.
+		// since/until bound Created, which never changes, so a bound selects
+		// which open tickets to look at without hiding any; RT counts the
+		// result exactly.
 		return newPlan(request.Intent, RouteStep{
 			Source: SourceRequestTracker,
 			Action: "tickets.search",
 			Limit:  ticketSearchLimit,
 			Since:  sinceValue,
 			Until:  untilValue,
+			Owner:  request.Owner,
+			Order:  request.Order,
+			Queues: request.Queues,
+			Status: request.Status,
 		}), nil
 
 	case IntentTicketsByHost:
@@ -255,6 +280,10 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Limit:  ticketSearchLimit,
 			Since:  sinceValue,
 			Until:  untilValue,
+			Owner:  request.Owner,
+			Order:  request.Order,
+			Queues: request.Queues,
+			Status: request.Status,
 		}), nil
 
 	default:
@@ -276,12 +305,7 @@ func (r *Router) planLiveEvidence(request RouteRequest) (RoutePlan, error) {
 		return RoutePlan{}, newRouteError("invalid_resource", err.Error())
 	}
 	if request.Since != "" || request.Until != "" {
-		// live.evidence reads a file from the endpoint as it stands now. There
-		// is no history to bound, so a window has nothing to filter and was
-		// silently dropped here for as long as this intent has existed -- the
-		// third state the rest of the router does not have, and the one this
-		// codebase keeps paying for: the caller believes it asked a narrower
-		// question than it asked, and reads a wide answer as a narrow one.
+		// live.evidence reads current state; a bound is refused, not dropped.
 		return RoutePlan{}, newRouteError("invalid_request",
 			"live.evidence reads the resource as it stands now and takes no since or until; "+
 				"there is no history at the endpoint for a window to filter")
@@ -345,12 +369,10 @@ func cloneResource(resource Resource) Resource {
 // Verify reports whether a plan is one this router would have produced under
 // the current policy.
 //
-// Policy is enforced when a plan is created, but a plan is an ordinary JSON
-// document: anything that can execute one must not assume it came from the
-// planner. Rather than trusting the plan or re-deriving authorization from it,
-// Verify reconstructs every plan the router could legitimately have produced
-// for this intent and requires the submitted plan to equal one of them. A
-// hand-edited path, an inflated limit, or a substituted operation all fail.
+// A plan is an ordinary JSON document, so an executor must not assume it came
+// from the planner. Verify reconstructs every plan the router could have
+// produced for this intent and requires an exact match: a hand-edited path,
+// inflated limit or substituted operation fails.
 func (r *Router) Verify(plan RoutePlan) error {
 	if len(plan.Steps) == 0 {
 		return newRouteError("invalid_plan", "plan contains no steps")
@@ -372,9 +394,9 @@ func (r *Router) Verify(plan RoutePlan) error {
 }
 
 // candidateRequests enumerates the route requests that could have produced a
-// plan with this intent and host. Every field the router derives rather than
-// copies -- operation, path, limits -- is deliberately not read from the plan,
-// so a modified value cannot steer the reconstruction toward itself.
+// plan with this intent and host. Derived fields (operation, path, limits)
+// are never read from the plan, so a modified value can't steer the
+// reconstruction toward itself.
 func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 	host := plan.Steps[0].Host
 
@@ -386,10 +408,8 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		return []RouteRequest{{Intent: plan.Intent, Host: host}}
 
 	case IntentMonitoringProblems, IntentMonitoringHistory:
-		// The selectors are carried verbatim in the plan rather than resolved
-		// from policy, so reconstruction reads them back. Validation runs again
-		// during the replan: a limit inflated after planning fails to
-		// reconstruct, because the router refuses to produce that plan.
+		// Selectors are carried verbatim, so they are read back; the replan
+		// validates them again.
 		return []RouteRequest{{
 			Intent: plan.Intent, Host: host,
 			Since: plan.Steps[0].Since, Until: plan.Steps[0].Until,
@@ -398,9 +418,7 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		}}
 
 	case IntentDatabaseQuery:
-		// The query is carried verbatim in the plan rather than resolved from
-		// policy, so reconstruction uses it directly. Validation runs again
-		// during the replan, so a query edited after planning is still caught.
+		// The query is carried verbatim; the replan validates it again.
 		return []RouteRequest{{Intent: plan.Intent, Query: plan.Steps[0].Query}}
 
 	case IntentLiveEvidence:
@@ -420,11 +438,14 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		}
 		return requests
 
-	case IntentTicketsOpen:
-		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until}}
-
-	case IntentTicketsByHost:
-		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until}}
+	case IntentTicketsOpen, IntentTicketsByHost:
+		step := plan.Steps[0]
+		request := RouteRequest{Intent: plan.Intent, Since: step.Since, Until: step.Until, Owner: step.Owner,
+			Order: step.Order, Queues: step.Queues, Status: step.Status}
+		if plan.Intent == IntentTicketsByHost {
+			request.Host = host
+		}
+		return []RouteRequest{request}
 
 	default:
 		return nil
@@ -434,20 +455,9 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 // LiveTargets reports the hosts authorized for live.evidence and the resource
 // names they may be asked for.
 //
-// The policy has always known both, and the model was never told either. Asked
-// to list a directory on a host it had just been told about by name, it
-// proposed host "sgtstubby" where the policy says "sgtstubby.arc.gwu.edu", and
-// resource "/var/log" and then "var_log" where the policy says "log-dir" --
-// three refusals in a row, each correct, none of them informative enough to be
-// the last. Guessing an alias out of a set the caller holds is not something a
-// model can be prompted into doing reliably, and it is not something it should
-// have to: if code can determine it, code must.
-//
-// Hosts and resources are returned separately rather than as a map because
-// they are used differently. A resource name is meaningful only for
-// live.evidence, so it can be offered as a closed set. A host is also a Wazuh
-// agent name and an RT subject, where any hostname is legitimate, so the live
-// list can only be advice.
+// They go into the tool schema so the model needn't guess names the policy
+// already holds. Resources become a closed set; hosts only advice, since a
+// host is also a Wazuh agent name and an RT subject.
 func (r *Router) LiveTargets() (hosts []string, resources []string) {
 	seen := make(map[string]struct{})
 	for host, allowed := range r.liveHosts {

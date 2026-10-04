@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -260,21 +261,21 @@ func TestRTConnectorSkipsQueueCensusWhenAllowlistIsLarge(t *testing.T) {
 }
 
 func TestTicketSearchQueryEscapesQuotes(t *testing.T) {
-	query := ticketSearchQuery("o'brien", "", "", "", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{host: "o'brien", queues: []string{"Ops"}})
 	if !strings.Contains(query, `Subject LIKE 'o\'brien'`) {
 		t.Errorf("query = %q, want an escaped quote", query)
 	}
 }
 
 func TestTicketSearchQueryFiltersByOwner(t *testing.T) {
-	query := ticketSearchQuery("", "jcreech@gwu.edu", "", "", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{owner: "jcreech@gwu.edu", queues: []string{"Ops"}})
 	if !strings.Contains(query, "Owner = 'jcreech@gwu.edu'") {
 		t.Errorf("query = %q, want an Owner filter", query)
 	}
 }
 
 func TestTicketSearchQueryAddsCreatedBounds(t *testing.T) {
-	query := ticketSearchQuery("", "", "2026-01-01 00:00:00", "2026-07-04 00:00:00", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{since: "2026-01-01 00:00:00", until: "2026-07-04 00:00:00", queues: []string{"Ops"}})
 	if !strings.Contains(query, "Created > '2026-01-01 00:00:00'") {
 		t.Errorf("query = %q, want a Created lower bound", query)
 	}
@@ -321,6 +322,42 @@ func TestRTConnectorFiltersByCreatedDate(t *testing.T) {
 	}
 	if evidence.Until != "2026-07-04T00:00:00Z" {
 		t.Errorf("evidence.Until = %q, want the applied bound echoed back", evidence.Until)
+	}
+}
+
+// A live morning-digest question asked the model for the same ticket's age
+// in days twice, minutes apart, and got 1719 once and 1354 the next --
+// computing it from Created by eye rather than reading an exact value. This
+// is why age_days is computed here instead: not a nicety, a fix for a real
+// answer that was off by nearly a year.
+func TestRTConnectorComputesAgeDaysFromCreated(t *testing.T) {
+	const ageDays = 10
+	created := time.Now().UTC().Add(-time.Duration(ageDays)*24*time.Hour - time.Hour)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("per_page") == "1" {
+			w.Write([]byte(`{"total":1,"items":[]}`))
+			return
+		}
+		fmt.Fprintf(w, `{"total":1,"items":[
+			{"id":"1","Subject":"aging ticket","Status":"open","Queue":"Ops","Created":"%s"}
+		]}`, created.Format(time.RFC3339))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  50,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(evidence.Items) == 0 {
+		t.Fatal("no items returned")
+	}
+	if got := evidence.Items[0].Fields["age_days"]; got != fmt.Sprintf("%d", ageDays) {
+		t.Errorf("age_days = %q, want %d computed from Created, not left for the model to work out", got, ageDays)
 	}
 }
 
@@ -579,18 +616,22 @@ func TestRTDateBoundRendersInRTsZone(t *testing.T) {
 // which tickets are seen at all.
 func TestTicketOrderFollowsTheBound(t *testing.T) {
 	for _, tc := range []struct {
-		name, since, until, want string
+		name, since, until, owner, explicit, want string
 	}{
-		{"older-than asks for the oldest", "", "2026-07-01T00:00:00Z", "ASC"},
-		{"since asks for the newest", "2026-09-01T00:00:00Z", "", "DESC"},
-		{"unbounded is a question about now", "", "", "DESC"},
+		{"older-than asks for the oldest", "", "2026-07-01T00:00:00Z", "", "", "ASC"},
+		{"since asks for the newest", "2026-09-01T00:00:00Z", "", "", "", "DESC"},
+		{"unbounded is a question about now", "", "", "", "", "DESC"},
+		{"oldest within a since bound, asked for explicitly", "2025-10-02T00:00:00Z", "", "", "oldest_first", "ASC"},
+		{"newest under an until bound, asked for explicitly", "", "2026-07-01T00:00:00Z", "", "newest_first", "DESC"},
 		// A window names both ends, and the newer one is the live edge; a
 		// reader asking about a window is not asking to start at its far end.
-		{"a window keeps the recent end", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "DESC"},
+		{"a window keeps the recent end", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "", "", "DESC"},
+		{"one owner reads oldest first with no bound", "", "", "aklwong@gwu.edu", "", "ASC"},
+		{"one owner with since still reads newest first", "2026-09-01T00:00:00Z", "", "aklwong@gwu.edu", "", "DESC"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ticketOrder(tc.since, tc.until); got != tc.want {
-				t.Errorf("ticketOrder(%q, %q) = %q, want %q", tc.since, tc.until, got, tc.want)
+			if got := ticketOrder(tc.since, tc.until, tc.owner, tc.explicit); got != tc.want {
+				t.Errorf("ticketOrder(%q, %q, %q, %q) = %q, want %q", tc.since, tc.until, tc.owner, tc.explicit, got, tc.want)
 			}
 		})
 	}
@@ -621,5 +662,200 @@ func TestSearchSendsRTsOwnOrderingSyntax(t *testing.T) {
 	}
 	if got.Get("order") != "ASC" {
 		t.Errorf("order = %q, want ASC as a separate parameter", got.Get("order"))
+	}
+}
+
+func TestRTConnectorOldestTicketByOwnerComesFromRT(t *testing.T) {
+	var censusOrders []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if r.URL.Query().Get("per_page") == "1" {
+			if strings.Contains(query, "Owner = ") {
+				censusOrders = append(censusOrders, r.URL.Query().Get("orderby")+" "+r.URL.Query().Get("order"))
+			}
+			switch {
+			case strings.Contains(query, "Owner = 'aklwong@gwu.edu'"):
+				// The oldest ticket is not on the returned page below.
+				w.Write([]byte(`{"total":29,"items":[{"id":"2631","Subject":"oldest","Status":"open","Queue":"Ops","Owner":"aklwong@gwu.edu","Created":"2022-02-18T10:00:00Z"}]}`))
+			case strings.Contains(query, "Owner = 'Nobody'"):
+				w.Write([]byte(`{"total":1,"items":[{"id":"118816","Subject":"unowned","Status":"new","Queue":"Ops","Owner":"Nobody","Created":"2026-09-19T13:21:20Z"}]}`))
+			default:
+				w.Write([]byte(`{"total":0,"items":[]}`))
+			}
+			return
+		}
+		w.Write([]byte(`{"total":30,"items":[
+			{"id":"104416","Subject":"page row","Status":"new","Queue":"Ops","Owner":"aklwong@gwu.edu","Created":"2025-10-02T10:00:00Z"},
+			{"id":"118816","Subject":"unowned","Status":"new","Queue":"Ops","Owner":"Nobody","Created":"2026-09-19T13:21:20Z"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  2,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	oldest := evidence.Earliest["oldest_ticket_of_each_owner"]
+	if got := oldest["aklwong@gwu.edu"].ID; got != "2631" {
+		t.Errorf("oldest ticket for aklwong = %q, want 2631 from RT, not the oldest row on the page", got)
+	}
+	if got := oldest["Nobody"].ID; got != "118816" {
+		t.Errorf("oldest ticket for Nobody = %q, want 118816", got)
+	}
+	scoped := false
+	for _, warning := range evidence.Warnings {
+		if strings.Contains(warning, "not the oldest tickets overall") {
+			scoped = true
+		}
+	}
+	if !scoped {
+		t.Errorf("warnings = %v, want one saying the table is per owner, not the oldest overall", evidence.Warnings)
+	}
+	for _, order := range censusOrders {
+		if order != "Created ASC" {
+			t.Errorf("per-owner census sorted %q, want Created ASC so its one row is the oldest", order)
+		}
+	}
+}
+
+func TestRTConnectorOwnerFilterNarrowsEverySearch(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		if r.URL.Query().Get("per_page") == "1" {
+			w.Write([]byte(`{"total":2,"items":[]}`))
+			return
+		}
+		w.Write([]byte(`{"total":2,"items":[
+			{"id":"2631","Subject":"a","Status":"open","Queue":"Ops","Owner":"aklwong@gwu.edu"},
+			{"id":"104416","Subject":"b","Status":"new","Queue":"Ops","Owner":"aklwong@gwu.edu"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  100,
+		Owner:  "aklwong@gwu.edu",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, query := range queries {
+		if !strings.Contains(query, "Owner = 'aklwong@gwu.edu'") {
+			t.Errorf("RT query %q is missing the owner filter; a count from it would cover every owner", query)
+		}
+	}
+	if evidence.Owner != "aklwong@gwu.edu" {
+		t.Errorf("evidence owner_filter = %q, want the applied owner recorded", evidence.Owner)
+	}
+	if _, ok := evidence.Breakdown["tickets_by_owner"]; ok {
+		t.Error("tickets_by_owner computed under an owner filter, where it only restates total_matching")
+	}
+}
+
+func TestRTConnectorOwnerFilterWithNoTicketsSaysWhy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"Ops"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Limit:  100,
+		Owner:  "uklwong@gwu.edu",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	found := false
+	for _, warning := range evidence.Warnings {
+		if strings.Contains(warning, "spelled differently") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want one saying an unknown login also returns nothing", evidence.Warnings)
+	}
+}
+
+func TestTicketSearchQueryUsesActiveOnlyWhenAsked(t *testing.T) {
+	plain := ticketSearchQuery(ticketFilter{queues: []string{"Ops"}})
+	if !strings.Contains(plain, "(Status = 'new' OR Status = 'open' OR Status = 'stalled')") || strings.Contains(plain, "__Active__") {
+		t.Errorf("default query = %q, want new/open/stalled", plain)
+	}
+	active := ticketSearchQuery(ticketFilter{status: broker.TicketStatusActive, queues: []string{"Ops"}})
+	if !strings.Contains(active, "Status = '__Active__'") || strings.Contains(active, "Status = 'new'") {
+		t.Errorf("active query = %q, want only Status = '__Active__'", active)
+	}
+}
+
+// Named queues narrow every search the step makes -- the page, the queue
+// census and the owner census -- not only the page.
+func TestRTConnectorSearchesOnlyTheNamedQueues(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		w.Write([]byte(`{"total":1,"items":[
+			{"id":"7","Subject":"s","Status":"open","Queue":"hpchelp","Owner":"alice","Created":"2025-01-01T00:00:00Z","LastUpdated":"2025-01-02T00:00:00Z"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"hpchelp", "rtshelp", "alerts"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Queues: []string{"RTSHELP", "hpchelp"},
+		Status: broker.TicketStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(queries) == 0 {
+		t.Fatal("no search was made")
+	}
+	for _, query := range queries {
+		if strings.Contains(query, "'alerts'") {
+			t.Errorf("query %q searched a queue that was not asked for", query)
+		}
+		if !strings.Contains(query, "Status = '__Active__'") {
+			t.Errorf("query %q lost the active status", query)
+		}
+	}
+	if !strings.Contains(queries[0], "Queue = 'rtshelp'") || !strings.Contains(queries[0], "Queue = 'hpchelp'") {
+		t.Errorf("page query = %q, want both named queues in the allowlist's spelling", queries[0])
+	}
+	if _, ok := evidence.Breakdown["tickets_by_queue"]["alerts"]; ok {
+		t.Error("tickets_by_queue counted a queue that was not asked for")
+	}
+	if !reflect.DeepEqual(evidence.Queues, []string{"rtshelp", "hpchelp"}) || evidence.Status != broker.TicketStatusActive {
+		t.Errorf("evidence records queues %v status %q, want the applied filter", evidence.Queues, evidence.Status)
+	}
+}
+
+func TestRTConnectorRefusesAQueueOffTheAllowlist(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("RT was asked about a queue outside the allowlist")
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"hpchelp", "rtshelp"})
+	_, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Queues: []string{"hpchelp", "payroll"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "payroll") || !strings.Contains(err.Error(), "hpchelp, rtshelp") {
+		t.Fatalf("Execute() error = %v, want a refusal naming the queue and the searchable ones", err)
 	}
 }

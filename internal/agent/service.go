@@ -110,7 +110,7 @@ func (s *Service) Execute(ctx context.Context, req RequestEnvelope) (ResponseEnv
 		case operationHostNetwork:
 			data, truncated, apiErr = s.hostNetwork()
 		case operationHostUptime, operationHostDiskFree,
-			operationHostListeners, operationKernelMessages:
+			operationHostListeners, operationKernelMessages, operationHostGPU:
 			data, truncated, apiErr = s.runCommandOperation(ctx, req.Operation)
 		}
 	}
@@ -399,15 +399,9 @@ func (s *Service) processList() (any, bool, *APIError) {
 		records = append(records, record)
 	}
 
-	// Measured on sgtstubby 2026-09-18: the deployed unit sets
-	// ProtectProc=invisible, which mounts /proc with hidepid=invisible, and
-	// the agent runs as a DynamicUser that owns almost nothing. The list that
-	// comes back is then the agent's own two or three processes -- correctly
-	// formed, plausibly short, and describing nothing about the machine.
-	//
-	// Refusing is the only honest answer. A caller cannot tell a quiet host
-	// from a blindfolded agent, and this operation exists to answer questions
-	// about the host.
+	// Under ProtectProc=invisible (hidepid) a DynamicUser agent sees only its
+	// own processes: a well-formed, plausibly short list that says nothing
+	// about the host. Refuse rather than return it.
 	if restricted, reason := procVisibilityRestricted(s.cfg.ProcRoot, records); restricted {
 		return nil, false, newAPIError(503, "process_view_restricted", reason)
 	}
@@ -563,14 +557,8 @@ func canonicalizeRoots(roots []string) []string {
 
 // selfHostname reports this host's name for the response metadata.
 //
-// Resolved once and cached: it is asked for on every response, it does not
-// change while the process runs, and a hostname lookup inside a request path
-// is a syscall nobody budgeted for.
-//
-// An error yields the empty string rather than a failure. The identity is a
-// cross-check, and a cross-check that can take the whole service down when it
-// cannot run is a worse bargain than one that declines to answer -- the
-// connector treats an unnamed host as unverifiable and says so.
+// Resolved once and cached. An error yields "" rather than failing the
+// service; the connector treats an unnamed host as unverifiable.
 var selfHostname = sync.OnceValue(func() string {
 	name, err := os.Hostname()
 	if err != nil {
@@ -582,13 +570,9 @@ var selfHostname = sync.OnceValue(func() string {
 // procVisibilityRestricted reports whether this agent is seeing only its own
 // processes rather than the host's.
 //
-// PID 1 is the test. It always exists, it is always root's, and under
-// hidepid=invisible a process belonging to another user is not merely
-// unreadable but absent from the directory listing. So a scan that produced
-// records and yet never saw PID 1 was looking at a filtered view.
-//
-// A scan that found nothing at all is a different failure and is reported as
-// one, rather than being folded in here.
+// PID 1 always exists and is root's, and hidepid=invisible hides other users'
+// processes entirely, so a scan with records but no PID 1 was filtered. An
+// empty scan is a different failure, reported separately.
 func procVisibilityRestricted(procRoot string, records []processRecord) (bool, string) {
 	if len(records) == 0 {
 		return true, "no processes were visible at all, which is not a state a running host can be in; " +

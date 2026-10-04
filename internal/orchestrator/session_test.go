@@ -255,6 +255,9 @@ func TestRetryIsOfferedForMalformedCallsButNotRefusals(t *testing.T) {
 		{"malformed request", &broker.RouteError{Code: "invalid_request"}, true},
 		{"invalid query", &broker.RouteError{Code: "invalid_query"}, true},
 		{"missing host", &broker.RouteError{Code: "missing_host"}, true},
+		// Observed 2026-10-01: until "3650d" was refused and, not retryable,
+		// ended the session instead of letting the model drop the bound.
+		{"invalid until", &broker.RouteError{Code: "invalid_until"}, true},
 		{"unauthorized host", &broker.RouteError{Code: "host_not_authorized"}, false},
 		{"unauthorized resource", &broker.RouteError{Code: "resource_not_authorized"}, false},
 		{"unrelated error", errors.New("boom"), false},
@@ -611,5 +614,74 @@ func TestDenialAfterEvidenceStillAnswers(t *testing.T) {
 	}
 	if turns < 3 {
 		t.Errorf("model turns = %d; the refusal should have gone back as a tool result", turns)
+	}
+}
+
+func TestThinkingIsSentOnlyWhenAskedFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		thinking   bool
+		budget     int
+		wantKwargs bool
+		wantBudget bool
+	}{
+		{"off by default", false, 0, false, false},
+		{"on without a cap", true, 0, true, false},
+		{"on with a cap", true, 512, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				json.Unmarshal(body, &sent)
+				io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`)
+			}))
+			defer server.Close()
+
+			client, err := NewMindRouterClient(MindRouterConfig{
+				Endpoint: server.URL, APIKey: "k", Model: "m",
+				Thinking: tc.thinking, ThinkingBudget: tc.budget,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "q"}}, nil, ""); err != nil {
+				t.Fatal(err)
+			}
+			kwargs, hasKwargs := sent["chat_template_kwargs"].(map[string]any)
+			if hasKwargs != tc.wantKwargs || (hasKwargs && kwargs["enable_thinking"] != true) {
+				t.Errorf("chat_template_kwargs = %v, want enable_thinking sent: %v", sent["chat_template_kwargs"], tc.wantKwargs)
+			}
+			if _, hasBudget := sent["thinking_token_budget"]; hasBudget != tc.wantBudget {
+				t.Errorf("thinking_token_budget present = %v, want %v", hasBudget, tc.wantBudget)
+			}
+		})
+	}
+}
+
+func TestSessionKeepsTheEvidenceItsModelSaw(t *testing.T) {
+	var turns int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turns++
+		if turns == 1 {
+			io.WriteString(w, `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[
+				{"id":"call_1","type":"function","function":{"name":"cass_evidence","arguments":"{\"intent\":\"agent.status\",\"host\":\"node02\"}"}}
+			]}}]}`)
+			return
+		}
+		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"node02 is disconnected."}}]}`)
+	}))
+	defer server.Close()
+
+	session := newTestSession(t, server.URL, &fakeConnector{source: broker.SourceWazuhAPI})
+	if _, err := session.Ask(context.Background(), "is node02 healthy?"); err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if got := len(session.Evidence()); got != 1 {
+		t.Fatalf("Evidence() returned %d results, want the 1 the model was given", got)
+	}
+	if _, err := session.Ask(context.Background(), "again?"); err != nil && len(session.Evidence()) > 1 {
+		t.Errorf("a second question kept the first question's evidence")
 	}
 }

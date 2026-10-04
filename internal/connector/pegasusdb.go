@@ -14,31 +14,23 @@ import (
 
 const (
 	pegasusDefaultTimeout = 60 * time.Second
-	// This bound is physics rather than policy: a result has to fit in a 32k
-	// context. It was fifty while uncollapsed window functions returned
-	// thousands of identical rows, which made listing look like the failure
-	// mode. With those collapsed an aggregate returns one row, so this now
-	// binds only on genuine listings and can be generous.
+	// Binds only on genuine listings; aggregates return a row or a few.
 	// CASS_PEGASUS_MAX_ROWS overrides it.
 	pegasusDefaultMaxRows = 500
 	pegasusMaxCellBytes   = 4096
-	// Sized against the model context rather than against the database. Every
-	// model here is capped at 32k tokens, roughly 128 KB, and the evidence has
-	// to leave room for the prompt, the question and an answer. A connector
-	// that returns more than the orchestrator will accept produces a query
-	// that succeeds and then fails.
-	// Sized for a 32k context, which is what most models here are clamped to.
-	// CASS_PEGASUS_MAX_BYTES raises it for a model with a larger window;
-	// raising it globally would overflow the models that do not have one.
+	// Kept below the orchestrator's 64 KB evidence cap (maxEvidenceJSON),
+	// which discards an oversized result whole: a result that passes here but
+	// fails there is a query that succeeds and still returns nothing.
+	// CASS_PEGASUS_MAX_BYTES overrides it; raise CASS_MAX_EVIDENCE with it.
 	pegasusMaxTotalBytes = 48 * 1024
 )
 
 // PegasusConfig carries operator-supplied connection details.
 //
-// Unlike the other connectors this one executes a query the model authored, so
-// the controls here are about resource use and result size rather than about
-// which operations exist. The credential grants SELECT on one schema and
-// cannot write, which is what makes that acceptable.
+// Unlike the other connectors this one runs a query the model wrote, so the
+// controls bound time and result size rather than which operations exist.
+// That is acceptable only because the credential is SELECT-only on one
+// schema.
 type PegasusConfig struct {
 	DSN              string
 	Timeout          time.Duration
@@ -74,21 +66,9 @@ func NewPegasusConnector(config PegasusConfig) (*PegasusConnector, error) {
 		timeout = pegasusDefaultTimeout
 	}
 
-	// One configured value governs all three bounds, because they were
-	// governed by three and disagreed.
-	//
-	// What was here before: the connector and max_statement_time both took 60s
-	// from pegasusDefaultTimeout, while the DSN in the deployment carried
-	// readTimeout=30s. So the client gave up at thirty seconds and the
-	// server-side limit -- the one whose whole purpose is to stop a query
-	// harming the database rather than merely inconveniencing the caller --
-	// sat at twice that and could never fire first. It was dead weight that
-	// read as protection.
-	//
-	// The DSN's own timeouts are overwritten rather than respected. They are
-	// connection-string details that get copied between hosts and edited by
-	// hand; a limit that matters should not be settable by whoever last pasted
-	// a DSN, and having it in two places is how they came to differ.
+	// One value sets the dial, read and statement limits. The DSN's own
+	// timeouts are overwritten: if they were lower, the client would give up
+	// before the server-side limit, which protects the database, could fire.
 	parsed.Timeout = timeout
 	parsed.ReadTimeout = timeout
 	dsn := parsed.FormatDSN()
@@ -100,11 +80,9 @@ func NewPegasusConnector(config PegasusConfig) (*PegasusConnector, error) {
 	if maxBytes <= 0 {
 		maxBytes = pegasusMaxTotalBytes
 	}
-	// The server gives up fractionally before the client does, so a query that
-	// runs too long ends as "max_statement_time exceeded" from MariaDB rather
-	// than as a client abandoning a connection. The first is a diagnosis; the
-	// second is a disconnection that could equally be a network fault, and the
-	// difference matters at 3am.
+	// The server limit defaults to 90% of the client's, so a slow query ends
+	// as MariaDB's "max_statement_time exceeded" (a diagnosis) rather than a
+	// dropped connection (which looks like a network fault).
 	statementTimeout := config.StatementTimeout
 	if statementTimeout <= 0 {
 		statementTimeout = timeout - timeout/10
@@ -147,8 +125,8 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 	if step.Action != "query.execute" {
 		return Evidence{}, newConnectorError("unsupported_action", fmt.Sprintf("action %q is not executable", step.Action))
 	}
-	// The planner validated the query's shape. Re-checking here keeps the
-	// connector safe to call directly, and costs nothing.
+	// The planner already validated the query; re-check so the connector is
+	// safe to call directly.
 	if err := broker.ValidateQuery(step.Query); err != nil {
 		return Evidence{}, newConnectorError("invalid_query", err.Error())
 	}
@@ -165,9 +143,8 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 	}
 	defer conn.Close()
 
-	// The server's default statement time limit is unlimited, so a query
-	// joining several million rows would run until it finished or the server
-	// suffered. Read-only means non-destructive to data, not to service.
+	// MariaDB's default statement limit is unlimited. Read-only protects the
+	// data, not the service.
 	millis := c.statementTimeout.Milliseconds()
 	if _, err := conn.ExecContext(ctx, "SET SESSION max_statement_time = ?", float64(millis)/1000.0); err != nil {
 		return Evidence{}, newConnectorError("transport", "could not bound statement time: "+err.Error())
@@ -190,12 +167,9 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 	}
 	rows.Close()
 
-	// How many rows the query would have produced. Without this a truncated
-	// result is indistinguishable from a complete one, and the distinction
-	// cannot be recovered from the rows themselves: an aggregate grouped by
-	// user returns well-formed rows with different values, so half the groups
-	// going missing leaves no trace in the data. Asking the model to judge
-	// whether truncation mattered is asking it to guess.
+	// The full row count, so a truncated result can be told from a complete
+	// one. The rows can't show it: a grouped aggregate missing half its groups
+	// still looks well formed.
 	total, err := c.countRows(ctx, conn, step.Query)
 	if err != nil {
 		return Evidence{}, err
@@ -226,10 +200,9 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 	}, nil
 }
 
-// countRows reports how many rows the query yields, by wrapping it. The cost
-// is a second execution, which is the same trade the Zabbix connector makes
-// for the same reason: a page that cannot be told apart from a whole answer is
-// worse than a slower one.
+// countRows reports how many rows the query yields by wrapping it in
+// COUNT(*). It costs a second execution; the Zabbix connector makes the same
+// trade.
 func (c *PegasusConnector) countRows(ctx context.Context, conn *sql.Conn, query string) (int, error) {
 	wrapped := "SELECT COUNT(*) FROM (" + strings.TrimRight(strings.TrimSpace(query), "; \t\n\r") + ") AS cass_rowcount"
 
@@ -241,9 +214,8 @@ func (c *PegasusConnector) countRows(ctx context.Context, conn *sql.Conn, query 
 }
 
 // scanRows converts result rows into evidence items, stopping at the row limit
-// or the total byte budget, whichever comes first. A query returning eighteen
-// million rows is a legitimate SELECT that no context window can hold, so the
-// bound is enforced here rather than trusted to the query.
+// or the byte budget, whichever comes first. The bound is enforced here
+// because a valid SELECT can return millions of rows.
 func scanRows(rows *sql.Rows, columns []string, maxRows, maxBytes int) ([]EvidenceItem, bool, error) {
 	items := make([]EvidenceItem, 0, 64)
 	totalBytes := 0
@@ -285,8 +257,8 @@ func scanRows(rows *sql.Rows, columns []string, maxRows, maxBytes int) ([]Eviden
 		}
 	}
 	if err := rows.Err(); err != nil {
-		// A statement killed by max_statement_time surfaces here rather than at
-		// query time, and reads as an ordinary read error unless named.
+		// A statement killed by max_statement_time surfaces here, not at query
+		// time, so name it.
 		if strings.Contains(err.Error(), "max_statement_time") {
 			return nil, false, newConnectorError("query_timeout", "query exceeded the configured statement time limit")
 		}
@@ -295,26 +267,13 @@ func scanRows(rows *sql.Rows, columns []string, maxRows, maxBytes int) ([]Eviden
 	return items, false, nil
 }
 
-// dialectHint appends the correction for a mistake this database rejects and
-// the error message does not explain.
+// dialectHint appends the fix for a MariaDB syntax error whose message doesn't
+// explain itself: PERCENTILE_CONT or PERCENTILE_DISC without WITHIN GROUP
+// (ORDER BY ...). Without it the model spent its turns on syntax, then
+// substituted a wrong calculation and presented it as a percentile.
 //
-// Which SQL dialect is behind this connector is a fixed property of the
-// deployment, not something to be rediscovered per question. Left to
-// rediscovery it was got wrong repeatedly: asked for percentiles, the model
-// sent PERCENTILE_CONT(0.25) OVER (), MariaDB answered with a bare "error in
-// your SQL syntax ... near 'OVER ()'", and nothing in that text says the
-// ordered-set function needs WITHIN GROUP (ORDER BY ...). Three of five turns
-// on one question went to that, in two spellings, and the question failed.
-//
-// The worse outcome was the one that did not fail. Having run out of syntax to
-// try, the model substituted AVG over the lowest N% of rows and presented it
-// as percentiles. That is always biased low, and it was: a P90 wait reported
-// as 260.6 minutes against a true 3280.3, with no error anywhere. A hint that
-// costs one string comparison prevents both.
-//
-// Deliberately narrow. It fires only on a syntax error, only for the two
-// ordered-set functions, and only when the required clause is absent -- so it
-// cannot mislead a query that failed for some other reason.
+// It fires only on error 1064, only for those two functions, and only when
+// WITHIN GROUP is absent, so it can't mislead a query that failed otherwise.
 func dialectHint(query, failure string) string {
 	if !strings.Contains(failure, "1064") {
 		return ""

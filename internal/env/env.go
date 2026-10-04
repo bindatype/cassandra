@@ -1,17 +1,12 @@
 // Package env reads this program's environment variables during the rename
 // from SROIAAA to Cassandra.
 //
-// Every variable is CASS_-prefixed now. The old SROIAAA_ spelling still works,
-// because the names are not only ours: they live in ~/.config/cassandra/env on
-// every host that runs this, in the crontab that posts the morning digest at
-// 04:45, and in environment files belonging to contributors whose machines
-// nobody else can reach. A rename that renames those in the same instant
-// breaks a scheduled job and two people's setups, and does it silently -- the
-// digest's failure mode is that nothing is posted.
-//
-// So both spellings are read, the new one wins, and using the old one says so
-// on stderr. When nothing has reported a legacy read for a while, delete this
-// package and call os.Getenv directly.
+// Every variable is CASS_-prefixed. The old SROIAAA_ spelling still works,
+// because the names live in env files and crontabs on hosts this repo can't
+// update, and a missed rename fails silently (the morning digest just doesn't
+// post). Both spellings are read, the new one wins, and using the old one
+// says so on stderr. When no legacy read has been reported for a while,
+// delete this package and call os.Getenv directly.
 package env
 
 import (
@@ -35,11 +30,9 @@ var (
 
 // Get returns the value of name, falling back to its SROIAAA_ spelling.
 //
-// An empty value counts as unset. That is not strictly what the shell means,
-// but every variable here is an endpoint, a credential, a path or a limit, and
-// for all of them "set to empty" and "not set" call for the same behaviour --
-// while treating them differently would mean an empty CASS_ variable silently
-// masking a populated SROIAAA_ one, which is the confusing direction.
+// An empty value counts as unset, so an empty CASS_ variable can't mask a
+// populated SROIAAA_ one. For endpoints, credentials, paths and limits the
+// two mean the same anyway.
 func Get(name string) string {
 	value, _ := Lookup(name)
 	return value
@@ -65,8 +58,7 @@ func Lookup(name string) (string, bool) {
 }
 
 // LegacyName returns the SROIAAA_ spelling of a CASS_ variable, or "" for a
-// name this package does not own -- HOME and PATH are read through here too in
-// places, and inventing SROIAAA_HOME for them would be nonsense.
+// name this package does not own (HOME and PATH are read through here too).
 func LegacyName(name string) string {
 	if !strings.HasPrefix(name, prefix) {
 		return ""
@@ -77,10 +69,8 @@ func LegacyName(name string) string {
 // ReportLegacy writes one line naming every old variable that was read, and
 // reports whether it wrote anything.
 //
-// One line rather than one per variable, and only at the end: a warning per
-// lookup would print the same thing five times for a single run and train
-// people to pipe stderr to /dev/null, which is where the next real warning
-// would go too.
+// One line per run, not per lookup, so it doesn't train people to discard
+// stderr.
 func ReportLegacy(w io.Writer) bool {
 	mu.Lock()
 	defer mu.Unlock()

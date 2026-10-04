@@ -6,17 +6,15 @@ import (
 	"time"
 )
 
-// maxSinceAge bounds how far back a request may reach. A window of years is
-// not a filter, and asking a source for everything since 2019 is the same
-// unbounded query the limits exist to prevent.
+// maxSinceAge bounds how far back a request may reach; a window of years is
+// not a filter.
 const maxSinceAge = 400 * 24 * time.Hour
 
 // ParseSince validates a time bound and returns it in UTC.
 //
-// Accepted forms are RFC 3339, a plain date, and a relative window such as
-// "24h" or "7d", because a model asked for "today" reaches for the shortest
-// thing that could work and a parser that accepts only one form turns a
-// well-formed question into a denial.
+// Accepted forms are RFC 3339, a plain date, a relative window such as "24h"
+// or "7d", and words such as "today": models reach for whichever is shortest,
+// and refusing a form turns a good question into a denial.
 func ParseSince(value string, now time.Time) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
@@ -25,16 +23,8 @@ func ParseSince(value string, now time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("since is too long")
 	}
 
-	// The words a question about a time period reaches for first. A model asked
-	// "did anything alert today" wrote since: "today", and rejecting that turns
-	// a well-formed question into a denial over vocabulary.
-	//
-	// Built in the caller's zone, then compared as an instant. This used to
-	// take the calendar date from a local clock and stamp it midnight UTC,
-	// which is not a day in either zone: at 20:07 EDT on 3 September it made
-	// "today" begin at 8pm on the 2nd, a 28-hour window. An operator asking
-	// what happened today got four hours of yesterday evening as well, and no
-	// part of the answer said so.
+	// Day words are resolved in the caller's zone, then compared as an
+	// instant. A local date stamped midnight UTC is a day in neither zone.
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "today":
@@ -75,12 +65,9 @@ func parseDays(value string) (time.Duration, error) {
 
 // bound validates a resolved instant and returns it in UTC.
 //
-// The zone matters while a day boundary is being computed and must not survive
-// into the result. Plan writes these into a step with Format, and Verify
-// re-plans and compares with reflect.DeepEqual: the same instant carried as
-// "2026-07-05T00:00:00-04:00" by one path and "2026-07-05T04:00:00Z" by
-// another is equal as a time and unequal as a plan, and the plan is rejected
-// as unauthorized.
+// The zone matters while a day boundary is computed and must not survive into
+// the result: Verify re-plans and compares with reflect.DeepEqual, so the
+// same instant written with two offsets would fail as unauthorized.
 func bound(moment, now time.Time) (time.Time, error) {
 	if moment.After(now.Add(time.Minute)) {
 		return time.Time{}, fmt.Errorf("since is in the future")
@@ -91,9 +78,9 @@ func bound(moment, now time.Time) (time.Time, error) {
 	return moment.UTC(), nil
 }
 
-// ParseUntil closes the window ParseSince opens. It accepts the same forms and
-// treats a plain date as the end of that day rather than its start, because
-// "until May 21st" means through the 21st, not up to its first second.
+// ParseUntil closes the window ParseSince opens. It accepts the same forms,
+// and a plain date means the end of that day ("until May 21st" includes the
+// 21st).
 func ParseUntil(value string, ref time.Time) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
@@ -108,5 +95,10 @@ func ParseUntil(value string, ref time.Time) (time.Time, error) {
 	case "yesterday":
 		return midnight.UTC(), nil
 	}
-	return ParseSince(value, ref)
+	// ParseSince words its errors for since; this one is reporting on until.
+	moment, err := ParseSince(value, ref)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s", strings.Replace(err.Error(), "since", "until", 1))
+	}
+	return moment, nil
 }

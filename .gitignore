@@ -19,3 +19,11 @@ __pycache__/
 /cass-broker-plan
 /cass-chat
 /cass-notify
+
+# Hermes/askcass working directories -- these hold live request/response
+# data (inbox, outbox, generated reports), not source. A misdirected `cd`
+# into this checkout has already written stray copies here once
+# (2026-09-24); ignored so that mistake can never become a commit.
+/inbox/
+/outbox/
+/reports/

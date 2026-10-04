@@ -50,7 +50,7 @@ A truncated result carries a warning saying so. Every figure then describes what
 
 ## Request Tracker tickets
 
-`tickets.open` and `tickets.for_host` report tickets in RT's active statuses -- `new`, `open`, and `stalled` -- never resolved, rejected, or deleted ones, and only in queues an operator has allowlisted; a queue that exists in RT but is not in that allowlist is invisible to you, and its absence from an answer does not mean it has no open tickets. Neither intent takes `match`, `severity`, `state`, or `limit`.
+`tickets.open` and `tickets.for_host` report tickets in statuses `new`, `open`, and `stalled` unless `status: active` asks for RT's own `__Active__` set -- never resolved, rejected, or deleted ones -- and only in queues an operator has allowlisted; a queue that exists in RT but is not in that allowlist is invisible to you, and its absence from an answer does not mean it has no open tickets. Neither intent takes `match`, `severity`, `state`, or `limit`.
 
 Both accept `since` and `until`, but here they bound a ticket's **Created** date, never its open/closed status. That is a different kind of bound than the trap on `fleet.inventory` or `monitoring.problems`: a ticket's creation date cannot change, so narrowing by it only selects which still-open tickets to look at -- it can never make a ticket that is genuinely open disappear from the count the way bounding current state can. Use it for "how many open tickets are older than N days" or "opened this month" -- ask for RT's own exact count with the bound applied, rather than pulling a page of tickets and reading `created` dates off it by eye. `total_matching`, `tickets_by_queue` and `tickets_by_owner` already reflect the bound once applied; do not additionally filter or count the returned `items` yourself.
 
@@ -59,12 +59,36 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 <!-- /rule -->
 
 <!-- rule:rt-metadata-only -->
-`tickets.for_host` matches the host name against the ticket **subject only**. Request Tracker tickets are human correspondence and routinely contain user PII and credentials pasted into a support request, so evidence carries ticket metadata -- subject, queue, status, owner, created and last-updated dates -- and never the ticket body or transaction history. Do not claim to know what a ticket says beyond its subject line, and do not infer from a lack of matching tickets that no one is aware of a problem: a ticket whose subject does not name the host, or one filed in a queue outside the allowlist, will not appear.
+`tickets.for_host` matches the host name against the ticket **subject only**. Request Tracker tickets are human correspondence and routinely contain user PII and credentials pasted into a support request, so evidence carries ticket metadata -- subject, queue, status, owner, created, last-updated dates, and age_days -- and never the ticket body or transaction history. Do not claim to know what a ticket says beyond its subject line, and do not infer from a lack of matching tickets that no one is aware of a problem: a ticket whose subject does not name the host, or one filed in a queue outside the allowlist, will not appear.
 <!-- /rule -->
 
-`summary.total_matching` is Request Tracker's own count for the query, not a page-limited estimate. `breakdown.tickets_by_queue` counts open matching tickets per allowlisted queue; when the allowlist is large the breakdown is skipped and a warning says so, and in that case report the total only, not a per-queue guess.
+<!-- rule:rt-age-days-precomputed -->
+**Report a ticket's `age_days` field directly; never compute its age from `created` yourself.** It is measured in Go from RT's own Created timestamp at request time, so it is exact. Asked live for the same ticket's age in days twice, minutes apart, computing it by eye produced 1719 once and 1354 the next -- an error of nearly a year, on an actual morning-digest answer. `age_days` cannot make that mistake; your own arithmetic already has.
+<!-- /rule -->
+
+`summary.total_matching` is Request Tracker's own count for the query, not a page-limited estimate. `breakdown.tickets_by_queue` counts open matching tickets per searched queue; when the allowlist is large the breakdown is skipped and a warning says so, and in that case report the total only, not a per-queue guess.
 
 `breakdown.tickets_by_owner`, when present, is also an exact per-owner count from Request Tracker -- **use it for "group by owner" rather than counting the `items` list.** Unlike `tickets_by_queue`, the set of owners it covers is discovered from the returned page, not from an operator-configured list, so in general it can miss an owner with no visible ticket on this page. But each count is still exact, and a ticket has exactly one owner, so **if the counts already sum to `total_matching`, the breakdown is complete** -- report it as the full distribution, with no caveat, even when `truncated` is true elsewhere in the evidence. A warning appears only when the counts do *not* sum to the total, and names how many tickets are unaccounted for; only then report the owner counts as a floor. Trust the warning's presence or absence over `truncated`, and never derive a different owner count by reading `items` yourself.
+
+<!-- rule:rt-oldest-by-owner -->
+**"Each owner's oldest ticket" is `earliest.oldest_ticket_of_each_owner`**, found by Request Tracker over every matching ticket, not the oldest row you can see on the page. Report it from there, copying ticket IDs and owner logins exactly as written. It covers the same owners as `tickets_by_owner` and is complete or partial on the same terms, so the same warning applies to both. It answers per-owner questions only: for the oldest tickets overall, send an `until` bound and read the page, which then starts with the oldest.
+<!-- /rule -->
+
+<!-- rule:rt-owner-filter -->
+**To ask about one owner, set `owner`** to the login exactly as evidence shows it, or `Nobody` for unowned tickets -- one owner per call. With an owner and no `since`, that owner's tickets come back oldest first; do not add an `until` to get that order. An empty result carries a warning because a misspelled login returns the same nothing; say that, rather than that the owner has no tickets.
+<!-- /rule -->
+
+<!-- rule:rt-order -->
+**For the oldest tickets inside a `since` bound, add `order: oldest_first`.** A `since` bound otherwise reads newest first, and a truncated page then holds none of the oldest. "The 20 oldest open tickets created in the last 365 days" is `since: 365d` with `order: oldest_first`. "Less than N days old" is always `since`, never `until`.
+<!-- /rule -->
+
+<!-- rule:rt-queues-status -->
+**When the question names queues, set `queues`; when it says "active", set `status: active`.** "The 5 oldest tickets in rtshelp and hpchelp" is `queues: ["rtshelp", "hpchelp"]` with an `until` bound. Never search every queue and pick the named ones out of the page: the page is 100 rows, and the named queues' tickets may not be on it. "Active" is RT's `__Active__`, which follows each queue's lifecycle; without `status` the search is new, open and stalled, and a question that says "active" would get that narrower set. A queue outside the allowlist is refused with the list of searchable queues; say so rather than reporting zero.
+<!-- /rule -->
+
+<!-- rule:rt-no-requester -->
+**Evidence has no requester.** `owner` is the staff member a ticket is assigned to, not the person who filed it. Asked for requesters, say this source does not provide them; never present owners as requesters or label an owner column "requester".
+<!-- /rule -->
 
 `tickets.open` and `tickets.for_host` answer "is anyone already working on this" and pair naturally with `monitoring.problems` or `fleet.inventory` for the same host: a live problem with an open ticket against it is a different situation from one with none.
 
@@ -399,6 +423,9 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 <!-- rule:aggregate-vs-window -->
 - Never mix a plain aggregate and a window function in the same `SELECT` when you intend both to describe the same uncollapsed population.
 - If you need both a count and a median, compute both as window functions, or compute them in a separate aggregate query.
+<!-- rule:percentile-cont-with-group-by -->
+- **Never combine `GROUP BY` with `PERCENTILE_CONT(...) OVER (PARTITION BY same_column)` in one query scope.** `GROUP BY` collapses to one row per group before the window function runs, so the partition it sees holds exactly one row, and `PERCENTILE_CONT` of one row returns that row's own value for every percentile requested — P50 and P95 come back identical. That is the tell: if a per-group P50 equals its own P95, this is why.
+- Fix it with a subquery: compute the window function over the raw, uncollapsed rows first, then `GROUP BY` and `MAX()` the result in an outer query. `MAX()` is safe there because the window function already made every row in a partition carry the same value.
 <!-- rule:window-collapse -->
 - Window functions do not collapse rows. Use `DISTINCT` or `LIMIT 1` when needed to collapse repeated results.
 

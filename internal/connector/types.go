@@ -10,88 +10,63 @@ import "time"
 
 // Evidence is the normalized result of executing one route step.
 //
-// Provenance fields are recorded so that downstream synthesis can state where
-// a claim came from, and so that an audit record can be written without
-// re-deriving the request.
+// Provenance fields let an answer say where a claim came from, and let the
+// audit record be written without re-deriving the request.
+//
+// The filter fields (Since through Owner) record what the source actually
+// applied. A filter that was asked for and is missing here was not applied,
+// and the rows answer a wider question than the one asked.
 type Evidence struct {
 	Source   string `json:"source"`
 	Action   string `json:"action"`
 	Endpoint string `json:"endpoint"`
-	// Query records what actually ran, when a source executes a statement the
-	// model composed. Without it an answer is unauditable by the person
-	// reading it: the number looks authoritative and its derivation is
-	// invisible.
+	// Query is the statement that ran, when the model wrote it, so a reader
+	// can check how a number was derived.
 	Query string `json:"query,omitempty"`
-	// Since is the time bound this source actually applied. A request that
-	// asked for one and gets evidence back without it has been answered from
-	// unfiltered data, which for a time-scoped question is wrong in the
-	// direction that reads as right.
+	// Since is the lower time bound applied.
 	Since string `json:"since,omitempty"`
-	// Until is the upper bound applied. Without one a window is a ray: a
-	// request for issues on a single past day returned everything from that day
-	// to now, sorted by recency, so the answer described today.
-	Until string `json:"until,omitempty"`
-	// Match, Severity, and State record the selectors the source actually
-	// applied, for the same reason Since is recorded: a request narrowed by a
-	// filter reads its result as narrow. If a filter was asked for and does not
-	// appear here, it was not applied, and the rows describe a wider question
-	// than the one asked.
+	// Until is the upper time bound applied. Without it a window on a past
+	// day runs to now, and a newest-first page describes today.
+	Until    string `json:"until,omitempty"`
 	Match    string `json:"match,omitempty"`
 	Severity string `json:"severity,omitempty"`
 	State    string `json:"state,omitempty"`
-	// Host is the same contract and was missing, which is how it came to be
-	// the one selector silently dropped. monitoring.history sent `host` to
-	// Zabbix event.get, which does not accept that parameter and ignores it:
-	// a question about one host returned 25 of 88,216 cluster-wide events,
-	// and nothing in the evidence said the filter had not applied. The
-	// mechanism built to catch exactly this had a hole in the shape of the bug.
-	Host string `json:"host_filter,omitempty"`
-	// Ordering records which end of the matching set the items came from, for
-	// the same reason Since is recorded. A truncated page is a sample, and a
-	// sample with an undeclared ordering reads as representative. Asked which
-	// tickets had waited longest, a model was handed the hundred most recent
-	// of several hundred, picked the earliest among them, and answered with
-	// perfect reasoning over evidence that excluded every ticket it was asked
-	// about.
+	Host     string `json:"host_filter,omitempty"`
+	Owner    string `json:"owner_filter,omitempty"`
+	// Queues and Status are set only when the request narrowed them; absent
+	// means every allowlisted queue and new/open/stalled.
+	Queues []string `json:"queue_filter,omitempty"`
+	Status string   `json:"status_filter,omitempty"`
+	// Ordering says which end of the matching set a truncated page came from.
+	// Without it a newest-first page reads as representative, and "oldest"
+	// gets answered from the newest rows.
 	Ordering    string    `json:"ordering,omitempty"`
 	RequestedAt time.Time `json:"requested_at"`
 	DurationMS  int64     `json:"duration_ms"`
 	ItemCount   int       `json:"item_count"`
-	// TotalAvailable is what the source reported as the full result size, when
-	// it reports one. A value larger than ItemCount means the plan's limit
-	// bounded the evidence, which a synthesizing model needs to know before it
-	// characterizes a fleet.
+	// TotalAvailable is the full result size, when the source reports one.
+	// Larger than ItemCount means the limit truncated the evidence.
 	TotalAvailable int `json:"total_available,omitempty"`
-	// Summary holds aggregate counts computed here, in code, rather than left
-	// for a model to tally from Items. A model asked to count several hundred
-	// records will sometimes get it wrong and state the wrong number with
-	// confidence, so any population-level claim must come from this field.
+	// Summary holds counts computed in code. Any population-level claim must
+	// come from here: a model counting hundreds of Items gets it wrong, and
+	// confidently.
 	Summary map[string]int `json:"summary,omitempty"`
-	// Warnings name checks that did not run, in words rather than as a missing
-	// key. A count that was never computed is not zero, and every mechanism
-	// that expressed this by omission has been resolved the reassuring way:
-	// asked which critical agents were down with no critical groups
-	// configured, a model answered "no critical agents are disconnected",
-	// which was posted to a channel while five of them were.
-	//
-	// A warning is a defect in the answer, not a footnote to it.
+	// Warnings name, in words, checks that did not run or limits that shaped
+	// the result. A missing key reads as zero; a count never computed is not
+	// zero. A warning is a defect in the answer, not a footnote to it.
 	Warnings []string `json:"warnings,omitempty"`
-	// Breakdown holds named aggregate tables computed here, in code, over every
-	// matching row rather than over the returned page.
-	//
-	// It exists because a large result is not answerable by showing more of it.
-	// Asked which systems were degraded one morning, the only available reply
-	// was the newest 25 of 1,200 events, which named a handful of hosts and
-	// implied the rest were fine. The rows cannot be widened far enough to fix
-	// that -- 1,200 of them would overrun the evidence budget and be discarded
-	// whole -- but the question was never about the rows. It was "which hosts,
-	// and how many each", and that is a table code can compute exactly.
+	// Breakdown holds named count tables computed in code over every matching
+	// row, not just the returned page. A large result is answered by
+	// aggregating it, not by returning more rows, which would overrun the
+	// evidence budget.
 	Breakdown map[string]map[string]int `json:"breakdown,omitempty"`
-	Truncated bool                      `json:"truncated"`
-	// Data carries a policy-approved endpoint-agent result whose shape depends
-	// on the fixed operation. Unlike the vendor connectors, the agent already
-	// returns bounded, normalized JSON; re-encoding it into synthetic rows
-	// would obscure the path, content, or list entries an operator asked for.
+	// Earliest holds each group's earliest record over every matching row,
+	// found by the source rather than read off a page by the model.
+	Earliest  map[string]map[string]EvidenceItem `json:"earliest,omitempty"`
+	Truncated bool                               `json:"truncated"`
+	// Data carries a cassd agent result as-is. The agent already returns
+	// bounded JSON whose shape depends on the operation; forcing it into
+	// Items would obscure it.
 	Data  any            `json:"data,omitempty"`
 	Items []EvidenceItem `json:"items"`
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,14 +21,15 @@ const (
 	mindrouterEndpointEnv = "CASS_MINDROUTER_ENDPOINT"
 	mindrouterKeyEnv      = "MINDROUTER_API_KEY"
 	mindrouterModelEnv    = "CASS_MODEL"
+	thinkingEnv           = "CASS_THINKING"
+	thinkingBudgetEnv     = "CASS_THINKING_BUDGET"
 	zabbixEndpointEnv     = "CASS_ZABBIX_ENDPOINT"
 	zabbixTokenEnv        = "ZABBIX_RO_TOKEN"
 	wazuhEndpointEnv      = "CASS_WAZUH_ENDPOINT"
 	wazuhUsernameEnv      = "WAZUH_API_USERNAME"
 	wazuhPasswordEnv      = "WAZUH_API_PASSWORD"
-	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated, as
-	// a comma-separated list. Site configuration, so it lives here rather than
-	// in the connector: at RTS it is "RTS_Ops,Viper".
+	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated,
+	// comma-separated (site configuration; at RTS, "RTS_Ops,Viper").
 	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
 	pegasusDSNEnv          = "CASS_PEGASUS_DSN"
 	pegasusMaxRowsEnv      = "CASS_PEGASUS_MAX_ROWS"
@@ -37,33 +39,20 @@ const (
 	rtEndpointEnv          = "CASS_RT_ENDPOINT"
 	rtTokenEnv             = "RT_API_TOKEN"
 	cassAgentConfigEnv     = "CASS_AGENT_CONFIG"
-	// rtQueuesEnv names the RT queues this deployment allows searching, as a
-	// comma-separated list. Site configuration, not a connector default: RT
-	// queues are organization-specific and there is no safe default that
-	// includes any of them.
+	// Set by cass-mcp for the person and agent a question is answered for.
+	callerEnv = "CASS_CALLER"
+	clientEnv = "CASS_CLIENT"
+	// rtQueuesEnv names the RT queues this deployment may search,
+	// comma-separated. There is no safe default.
 	rtQueuesEnv = "CASS_RT_QUEUES"
 
-	// defaultModel is chosen by scripts/eval_headtohead.py, which grades six
-	// question shapes rather than one: an aggregate, a grouped result that
-	// engages the row cap, a two-step schema lookup, a question with no data
-	// source that must be refused, a concept with no matching column that must
-	// be derived rather than refused, and a listing that exceeds the cap.
-	//
-	// On 2026-08-28, gemma4:31b scored 30/30 at 9.8s per question against
-	// llama3.3's 28/30 at 15.2s. Earlier single-question comparisons could not
-	// separate them; the concept case did.
-	//
-	// That instruction stands, and this value no longer satisfies it. On
-	// 2026-09-04 the gateway withdrew gemma4:31b and now serves exactly one
-	// model, gemma4-31b-vllm, so the suite cannot be rerun as a comparison and
-	// this fallback is a forced substitution rather than a graded choice. It
-	// has been exercised end to end -- the evidence loop answers correctly on
-	// it -- but it has not been scored against an alternative, because there
-	// is none to score it against.
-	//
-	// Restore the grading the first time a second model is served. Deployments
-	// can select a MindRouter alias with CASS_MODEL, and callers can
-	// override either value per call with -model.
+	// defaultModel should be chosen by scripts/eval_headtohead.py, which
+	// grades six question shapes. gemma4-31b-vllm is what Cassandra's
+	// evaluations run on, but it has not been graded head to head against
+	// another model; it became the default when the gateway briefly served
+	// nothing else.
+	// CASS_MODEL selects a MindRouter alias per deployment; -model overrides
+	// either per call.
 	defaultModel = "gemma4-31b-vllm"
 )
 
@@ -84,6 +73,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	showTrace := flags.Bool("trace", false, "print the policy decision trace to stderr")
 	auditPath := flags.String("audit", env.Get(auditPathEnv), "append a JSON-lines audit record for each question")
 	timeout := flags.Duration("timeout", 180*time.Second, "overall timeout")
+	asJSON := flags.Bool("json", false, "print {answer, evidence} as JSON instead of the answer alone")
 	// Written out rather than left to PrintDefaults, because a list of flags
 	// does not tell someone what the tool is for. The first thing a new user
 	// needs is the shape of a question it can answer.
@@ -94,13 +84,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	// Said once, after the flags have pulled their defaults from the
-	// environment, so a run that still depends on the old variable names says
-	// so out loud. This is what makes the compatibility temporary rather than
-	// permanent: silence here is how a shim outlives the rename.
+	// After the flags have read their defaults, warn once if any came from
+	// legacy names (see internal/env), so the shim doesn't outlive the rename.
 	env.ReportLegacy(stderr)
-	// Two separate failures, because a message naming the wrong flag sends the
-	// operator to fix something that was never wrong.
+	// One message per missing flag, naming the right one.
 	if *policyPath == "" {
 		fmt.Fprintln(stderr, "cass-chat: -policy is required")
 		return 2
@@ -139,14 +126,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		defer auditor.Close()
 		session = session.WithAudit(auditor, *model)
 	}
+	session = session.WithCaller(env.Get(callerEnv), env.Get(clientEnv))
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// Ask the endpoint agents what they implement before offering their
-	// resources to the model. A policy can advertise a capability a host does
-	// not have -- an agent upgraded on one host and not another does exactly
-	// that -- and without this the model discovers it by failing.
+	// Ask the endpoint agents what they implement, since policy can advertise
+	// an operation a host's agent lacks.
 	session.ReconcileAgents(ctx)
 
 	answer, askErr := session.Ask(ctx, question)
@@ -158,6 +144,27 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintf(stderr, "  [%s] %s %s\n", verdict, entry.Stage, entry.Detail)
 		}
+	}
+	if *asJSON {
+		out := struct {
+			Answer   string             `json:"answer,omitempty"`
+			Error    string             `json:"error,omitempty"`
+			Evidence []connector.Result `json:"evidence"`
+		}{Answer: answer, Evidence: session.Evidence()}
+		if askErr != nil {
+			out.Error = askErr.Error()
+		}
+		if out.Evidence == nil {
+			out.Evidence = []connector.Result{}
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
+			fmt.Fprintf(stderr, "cass-chat: encode: %v\n", err)
+			return 1
+		}
+		if askErr != nil {
+			return 1
+		}
+		return 0
 	}
 	if askErr != nil {
 		fmt.Fprintf(stderr, "cass-chat: %v\n", askErr)
@@ -198,26 +205,28 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 	if apiKey == "" {
 		return nil, fmt.Errorf("%s is not set (a value in ~/.bashrc must also be exported)", mindrouterKeyEnv)
 	}
+	thinking, thinkingBudget, err := thinkingSettings()
+	if err != nil {
+		return nil, err
+	}
 	client, err := orchestrator.NewMindRouterClient(orchestrator.MindRouterConfig{
-		Endpoint: endpoint,
-		APIKey:   apiKey,
-		Model:    model,
+		Endpoint:       endpoint,
+		APIKey:         apiKey,
+		Model:          model,
+		Thinking:       thinking,
+		ThinkingBudget: thinkingBudget,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Every connector the model could reach is built up front, because the
-	// intent it will propose is not known until it proposes one.
+	// Every reachable connector is built up front: the intent isn't known
+	// until the model proposes one.
 	var connectors []connector.Connector
 
-	// A source configured halfway is a mistake, not a choice: nobody sets an
-	// endpoint meaning to leave the credential out. Refusing here names the
-	// variable. Skipping silently withholds the intent from the tool schema
-	// instead, and the model then reports the source as "unavailable" -- which
-	// reads as an outage rather than an unset variable. That cost an afternoon
-	// on 2026-09-02, chasing RT through a pull, a rebuild and a merge before
-	// anyone looked at the env file.
+	// A half-configured source (endpoint without credential) is an error that
+	// names the variable. Skipping it would hide the intent, and the model
+	// would report the source "unavailable", which reads as an outage.
 	for _, half := range []struct{ endpoint, endpointEnv, credential, credentialEnv string }{
 		{zabbixEndpoint, zabbixEndpointEnv, env.Get(zabbixTokenEnv), zabbixTokenEnv},
 		{wazuhEndpoint, wazuhEndpointEnv, env.Get(wazuhUsernameEnv), wazuhUsernameEnv},
@@ -230,9 +239,8 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 		}
 	}
 
-	// The queue allowlist is the third RT variable and the easiest to miss.
-	// The connector refuses an empty one, correctly, but it is a library and
-	// cannot name the variable that would fix it.
+	// The connector refuses an empty queue allowlist but can't name the
+	// variable that fixes it; this can.
 	if rtEndpoint != "" && len(splitList(env.Get(rtQueuesEnv))) == 0 {
 		return nil, fmt.Errorf("%s is set but %s is not; there is no safe default queue set, "+
 			"so RT is refused rather than searched in full", rtEndpointEnv, rtQueuesEnv)
@@ -293,11 +301,8 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 		return nil, fmt.Errorf("no connectors configured; set a source endpoint and its credentials")
 	}
 
-	// What is switched off, for -trace only. This printed on every run, so a
-	// question about tickets was answered with a line about endpoint agents,
-	// and a source deliberately left unconfigured produced the same line
-	// forever. A notice that appears when it does not apply is read once and
-	// then never again, which is the state a real one needs to avoid.
+	// What is switched off, under -trace only: printed every run, it was
+	// noise that trained people to ignore it.
 	if trace {
 		if off := unconfiguredSources(zabbixEndpoint, wazuhEndpoint, rtEndpoint); len(off) > 0 {
 			fmt.Fprintf(os.Stderr, "not configured: %s\n", strings.Join(off, "; "))
@@ -326,8 +331,7 @@ func pegasusMaxRows() int {
 }
 
 // pegasusMaxBytes reads the evidence byte-cap override, falling back to the
-// connector default when unset. Raise it only alongside a model whose context
-// window can hold the result.
+// connector default when unset. Raise CASS_MAX_EVIDENCE with it.
 func pegasusMaxBytes() int {
 	value := env.Get(pegasusMaxBytesEnv)
 	if value == "" {
@@ -340,9 +344,7 @@ func pegasusMaxBytes() int {
 	return size
 }
 
-// splitList parses a comma-separated environment value, discarding blanks so a
-// trailing comma or a stray space does not become a group name that matches
-// nothing.
+// splitList parses a comma-separated environment value, discarding blanks.
 func splitList(value string) []string {
 	var out []string
 	for _, part := range strings.Split(value, ",") {
@@ -380,11 +382,8 @@ func unconfiguredSources(zabbixEndpoint, wazuhEndpoint, rtEndpoint string) []str
 // pegasusTimeout reads the query time bound, falling back to the connector
 // default when unset.
 //
-// One value, because it governs three things that previously disagreed: how
-// long the driver waits on a socket, how long the connector waits overall, and
-// what max_statement_time the server is told to enforce. Setting them
-// separately is how the server-side limit came to sit at twice the client's
-// and could never fire first.
+// One value sets the socket, connector and server statement limits, so the
+// server-side limit fires first (see NewPegasusConnector).
 func pegasusTimeout() time.Duration {
 	value := env.Get(pegasusTimeoutEnv)
 	if value == "" {
@@ -397,10 +396,8 @@ func pegasusTimeout() time.Duration {
 	return timeout
 }
 
-// usageText is the front of -help. It names what the tool answers from,
-// because "nine evidence channels" means nothing to someone typing askcass for
-// the first time, and it points at the way to ask for more -- the tool can now
-// answer questions about itself from its own documentation.
+// usageText is the front of -help: what the tool answers from, in plain
+// words, and that it can answer questions about itself.
 const usageText = `askcass -- ask a question about GW RTS infrastructure.
 
   askcass "how many Wazuh agents are disconnected right now?"
@@ -424,3 +421,28 @@ documentation rather than refusing:
 
 Flags:
 `
+
+// thinkingSettings reads CASS_THINKING (on/off) and CASS_THINKING_BUDGET
+// (reasoning tokens, 0 for no cap). Thinking is off unless asked for.
+func thinkingSettings() (bool, int, error) {
+	var on bool
+	switch strings.ToLower(strings.TrimSpace(env.Get(thinkingEnv))) {
+	case "", "0", "off", "false", "no":
+	case "1", "on", "true", "yes":
+		on = true
+	default:
+		return false, 0, fmt.Errorf("%s must be on or off, got %q", thinkingEnv, env.Get(thinkingEnv))
+	}
+	value := strings.TrimSpace(env.Get(thinkingBudgetEnv))
+	if value == "" {
+		return on, 0, nil
+	}
+	budget, err := strconv.Atoi(value)
+	if err != nil || budget < 0 {
+		return false, 0, fmt.Errorf("%s must be a non-negative number of tokens, got %q", thinkingBudgetEnv, value)
+	}
+	if budget > 0 && !on {
+		return false, 0, fmt.Errorf("%s is set but %s is not on", thinkingBudgetEnv, thinkingEnv)
+	}
+	return on, budget, nil
+}

@@ -12,11 +12,9 @@ const (
 	// aggregates rather than by the rows.
 	DefaultMonitoringLimit = 25
 
-	// MaxMonitoringLimit is as large a page as the evidence budget holds. A
-	// normalized event runs a couple of hundred bytes, and the orchestrator
-	// rejects evidence over 64 KB outright rather than trimming it, so a limit
-	// chosen to satisfy "show me all 1,200" would discard the answer entirely
-	// instead of shortening it.
+	// MaxMonitoringLimit is as large a page as the 64 KB evidence cap holds
+	// (an event is a couple of hundred bytes). Over the cap the whole result
+	// is discarded, not shortened.
 	MaxMonitoringLimit = 200
 
 	// maxMatchLen bounds the substring filter. It selects rows; it does not
@@ -28,8 +26,7 @@ const (
 // numeric priorities Zabbix stores. A request names "high"; nothing outside
 // this file should have to know that Zabbix calls it 4.
 //
-// The names are the ones a reader sees in an answer, so a model that has read
-// one page of evidence already knows the vocabulary for narrowing the next.
+// The names match what evidence shows, so the model already knows them.
 var severityFloors = map[string]int{
 	"not classified": 0,
 	"information":    1,
@@ -65,11 +62,9 @@ const (
 
 // validateMatch checks the substring filter.
 //
-// It is a filter, not an expression: Zabbix applies it as a LIKE against a
-// name column with the value bound, so the risk here is not injection but a
-// model quietly passing something that matches nothing. Rejecting control
-// characters and empty-after-trim keeps a malformed filter from reading as a
-// genuine absence of results.
+// Zabbix binds the value into a LIKE, so the risk is not injection but a
+// filter that silently matches nothing. Control characters and blank values
+// are rejected so a malformed filter can't read as "no results".
 func validateMatch(match string) error {
 	if strings.TrimSpace(match) != match {
 		return fmt.Errorf("match must not begin or end with whitespace")
@@ -107,12 +102,8 @@ func validateState(state string) error {
 
 // resolveLimit turns a requested page size into the one a step will carry.
 //
-// An over-large request is refused rather than clamped. Clamping would hand
-// back 200 rows to a caller who asked for 2,000 and had no way to tell the
-// difference from the outside -- and the caller most likely to ask for 2,000
-// is one who has just been told 1,200 rows matched, which is exactly the
-// reader who must not mistake a page for a population. The error names the
-// cap, so the next attempt is informed rather than another guess.
+// An over-large request is refused, naming the cap, rather than silently
+// clamped: a caller who asked for 2,000 rows must not mistake 200 for all.
 func resolveLimit(requested int) (int, error) {
 	switch {
 	case requested == 0:
@@ -147,10 +138,8 @@ func monitoringSelectors(request RouteRequest, allowState bool) (match, severity
 	}
 	if request.State != "" {
 		if !allowState {
-			// monitoring.problems reports triggers that are firing, so every
-			// row it can return is already in the problem state. Accepting the
-			// filter and ignoring it would let "state: resolved" return a page
-			// of active problems, which reads as an answer.
+			// monitoring.problems returns only firing triggers, so a state
+			// filter there would be silently ignored.
 			return "", "", "", 0, newRouteError("invalid_request",
 				"monitoring.problems returns only problems that are currently firing and takes no state; "+
 					"use monitoring.history to ask what has resolved")

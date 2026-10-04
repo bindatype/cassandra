@@ -65,51 +65,59 @@ type RouteRequest struct {
 	Intent   Intent `json:"intent"`
 	Host     string `json:"host,omitempty"`
 	Resource string `json:"resource,omitempty"`
-	// Query is the one field a model may author rather than choose from a
-	// fixed set. It applies to database.query only, where the credential's
-	// single-schema read grant bounds the damage class in a way that no
-	// filesystem path could.
+	// Query is model-authored SQL, for database.query only. That is
+	// acceptable there because the credential is a read grant on one schema.
 	Query string `json:"query,omitempty"`
-	// Since bounds evidence to what changed after a moment, as RFC 3339. It is
-	// a property of a request rather than of any one source: each connector
-	// maps it to its own idiom. A connector that cannot honour it must say so
-	// in the evidence rather than return unfiltered rows, because a time-scoped
-	// question answered from unfiltered data is wrong in the direction that
-	// looks right.
+	// Since bounds evidence to what changed after a moment, as RFC 3339; each
+	// connector maps it to its own idiom. An intent that can't honour a bound
+	// refuses it rather than returning unfiltered rows.
 	Since string `json:"since,omitempty"`
-	// Until closes the window Since opens. Without it a bound is a ray: asking
-	// for issues "on May 21st" with only a lower bound returned everything from
-	// May to now, sorted by recency, so the answer described today.
+	// Until closes the window Since opens. Without it a question about one
+	// past day is answered from that day to now.
 	Until string `json:"until,omitempty"`
 	// Match narrows monitoring evidence to problems whose name contains this
-	// text. It is the difference between a question and a page: asked which
-	// hosts lost their Zabbix agent since 05:00, the only available move was to
-	// fetch the newest 25 of 1,200 events and hope the relevant ones were among
-	// them. They were not, and nothing in the result said so.
-	//
-	// Like Query this is authored rather than chosen, and like Query it is
-	// bounded by what it reaches: a substring filter over a name column cannot
-	// widen the request beyond the intent that carries it.
+	// text, so a question about one kind of problem isn't answered from a
+	// general page. Model-authored, but a substring filter can only narrow the
+	// intent that carries it.
 	Match string `json:"match,omitempty"`
-	// Severity is the floor, named rather than numbered: "warning" and above,
-	// "high" and above. The census already reports the breakdown, so a reader
-	// asking only about disasters was being handed 25 rows of information-level
-	// noise and a count they had to filter by eye.
+	// Severity is a floor, named rather than numbered ("high" means high and
+	// above).
 	Severity string `json:"severity,omitempty"`
-	// State selects problems that are still open or ones that have closed.
-	// Applies to monitoring.history, whose event log carries both: an incident
-	// that opened and resolved within the window appears twice, and "what broke
-	// this morning" and "what is still broken" are different questions asked of
-	// the same rows.
+	// State selects problem (opening) or resolved (closing) events, for
+	// monitoring.history only: an incident that opened and closed in the
+	// window appears twice in the event log.
 	State string `json:"state,omitempty"`
-	// Limit is how many rows to return, up to MaxMonitoringLimit. It exists
-	// because the default is a sample and was being read as a population. It is
-	// still a page: raising it far enough to hold 1,200 events would overrun
-	// the evidence budget, so the honest answers to a large result are a
-	// narrower filter and the aggregates computed alongside it, not a bigger
-	// page.
+	// Limit is how many rows to return, up to MaxMonitoringLimit. It is still
+	// a page: a large result is answered with a narrower filter and the
+	// aggregates, not a bigger page, which would overrun the evidence budget.
 	Limit int `json:"limit,omitempty"`
+	// Owner narrows ticket evidence to one Request Tracker owner login, as it
+	// appears in evidence, or Nobody for unowned tickets. One owner per call.
+	Owner string `json:"owner,omitempty"`
+	// Order picks which end of a truncated ticket page to read: oldest_first
+	// or newest_first. Without it the bound decides; it is needed for "the
+	// oldest tickets created in the last N days" (since plus oldest_first).
+	Order string `json:"order,omitempty"`
+	// Queues narrows ticket evidence to some of the allowlisted RT queues.
+	// Empty means every allowlisted queue; a queue outside the allowlist is
+	// refused by the connector, which holds the allowlist.
+	Queues []string `json:"queues,omitempty"`
+	// Status picks which tickets count as open. Empty is new, open and
+	// stalled; TicketStatusActive is RT's __Active__, which follows each
+	// queue's own lifecycle.
+	Status string `json:"status,omitempty"`
 }
+
+// Ticket page orderings a request may ask for explicitly.
+const (
+	TicketOrderOldestFirst = "oldest_first"
+	TicketOrderNewestFirst = "newest_first"
+)
+
+// TicketStatusActive selects RT's __Active__ statuses instead of the default
+// new, open and stalled. A queue with its own lifecycle can have active
+// statuses that are none of those three.
+const TicketStatusActive = "active"
 
 type RoutePlan struct {
 	Version int         `json:"version"`
@@ -129,6 +137,10 @@ type RouteStep struct {
 	Match     string           `json:"match,omitempty"`
 	Severity  string           `json:"severity,omitempty"`
 	State     string           `json:"state,omitempty"`
+	Owner     string           `json:"owner,omitempty"`
+	Order     string           `json:"order,omitempty"`
+	Queues    []string         `json:"queues,omitempty"`
+	Status    string           `json:"status,omitempty"`
 	Target    *OperationTarget `json:"target,omitempty"`
 	Params    *OperationParams `json:"params,omitempty"`
 }

@@ -20,18 +20,15 @@ const (
 	zabbixDefaultTimeout   = 15 * time.Second
 	zabbixMaxResponseBytes = 1 << 20
 	zabbixMaxLimit         = 500
-	// maxCensusRows bounds the severity census. It returns one small integer
-	// per matching row, so a few thousand is cheap, but it must still be
-	// bounded: an unbounded fetch is the thing every other limit here prevents.
+	// maxCensusRows bounds the severity census: one small integer per row, so
+	// cheap, but still bounded. Past it, exactCensus takes over.
 	maxCensusRows = 20000
-	// maxHostCensusRows bounds the per-host breakdown. It carries a host object
-	// per row rather than a single integer, so it costs several times what the
-	// severity census does and cannot share its ceiling without risking the
-	// response cap -- which fails the whole step rather than shortening it.
+	// maxHostCensusRows bounds the per-host census. Each row carries a host
+	// object, so it is lower than maxCensusRows to stay under the response
+	// cap, which fails the whole step rather than shortening it.
 	maxHostCensusRows = 5000
-	// maxBreakdownHosts keeps the breakdown itself from becoming the thing that
-	// overruns the evidence budget. The hosts that matter are the ones with the
-	// most events; the tail is reported as a count, not as names.
+	// maxBreakdownHosts keeps the breakdown within the evidence budget: the
+	// busiest hosts are named, the rest only counted.
 	maxBreakdownHosts = 25
 )
 
@@ -40,9 +37,8 @@ const (
 // API method.
 var zabbixMethods = map[string]string{
 	"trigger.get": "trigger.get",
-	// The event log. trigger.get reports which triggers are firing now and when
-	// each last changed state, which cannot answer what happened on a past day:
-	// 21 May had no trigger whose state last changed then, and 5011 events.
+	// The event log. trigger.get reports current state and each trigger's
+	// last change, so it can't answer what happened on a past day.
 	"event.get": "event.get",
 }
 
@@ -145,9 +141,8 @@ func (c *ZabbixConnector) Execute(ctx context.Context, step broker.RouteStep) (E
 			return Evidence{}, newConnectorError("invalid_since", err.Error())
 		}
 		params["lastChangeSince"] = moment.Unix()
-		// Severity order is wrong for a question about recency: the most severe
-		// problems here have been firing since 2024, so the top of that list
-		// contains nothing from today.
+		// Sort by recency: the most severe problems here have fired for years,
+		// so a severity-ordered page holds nothing from the window.
 		params["sortfield"] = "lastchange"
 	}
 	if step.Until != "" {
@@ -167,10 +162,8 @@ func (c *ZabbixConnector) Execute(ctx context.Context, step broker.RouteStep) (E
 		return Evidence{}, err
 	}
 
-	// Zabbix does not report how many rows matched, so a limited result is
-	// indistinguishable from a complete one. Ask separately for the true count,
-	// otherwise a model will state the plan's limit as though it were the
-	// population.
+	// Zabbix doesn't report how many rows matched, so ask separately; without
+	// it a model states the page limit as the population.
 	total, severities, err := c.census(ctx, method, params)
 	if err != nil {
 		return Evidence{}, err
@@ -181,9 +174,8 @@ func (c *ZabbixConnector) Execute(ctx context.Context, step broker.RouteStep) (E
 	summary := summarizeTriggers(items, total, severities)
 	boundedTotal := total
 	if step.Host != "" && total == 0 {
-		// Zero rows for a named host is ambiguous: the host may be healthy, or
-		// it may not exist. Reporting "no problems" for a host Zabbix has never
-		// heard of reads as an assurance about a machine we know nothing about.
+		// Zero rows for a named host means healthy or unknown; check which
+		// before it reads as an all-clear.
 		known, err := c.hostExists(ctx, step.Host)
 		if err != nil {
 			return Evidence{}, err
@@ -237,23 +229,16 @@ func (c *ZabbixConnector) executeEvents(ctx context.Context, step broker.RouteSt
 		"sortorder":   "DESC",
 		"limit":       limit,
 	}
-	// event.get does not accept `host`. It accepts `hostids`, and it ignores
-	// parameters it does not know rather than rejecting them -- so sending
-	// `host` here filtered nothing and said nothing. Asked for one host's
-	// events, this returned 25 of 88,216 from the whole cluster, and the
-	// census ran with the same params so even the total was unfiltered.
-	//
-	// trigger.get does accept `host`, which is why monitoring.problems was
-	// unaffected and why the mistake survived.
+	// event.get takes hostids, not host, and silently ignores parameters it
+	// doesn't know, so a host name sent here would filter nothing.
+	// (trigger.get does accept host.)
 	if step.Host != "" {
 		hostIDs, err := c.resolveHostIDs(ctx, step.Host)
 		if err != nil {
 			return Evidence{}, err
 		}
 		if len(hostIDs) == 0 {
-			// Returning the cluster's events for a host Zabbix has never heard
-			// of is the worst available answer: it is voluminous, confident,
-			// and about other machines.
+			// Refuse rather than fall back to the whole cluster's events.
 			return Evidence{}, newConnectorError("unknown_host",
 				"zabbix does not monitor a host named "+step.Host+"; no event history can be scoped to it")
 		}
@@ -368,28 +353,21 @@ func (c *ZabbixConnector) executeEvents(ctx context.Context, step broker.RouteSt
 // applySelectors adds the request's narrowing filters to a set of API
 // parameters.
 //
-// The two methods spell the same three ideas differently, which is exactly the
-// kind of detail a caller should not have to carry: trigger.get takes a
-// severity floor as min_severity, event.get takes an explicit list; the
-// searchable column is description on one and name on the other; and only the
-// event log has a resolved state to select at all.
+// The two methods spell the same ideas differently: trigger.get takes
+// min_severity and searches description; event.get takes a severity list and
+// searches name; only event.get has a resolved state.
 func applySelectors(params map[string]any, method string, step broker.RouteStep) error {
 	if step.Match != "" {
 		column := "description"
 		if method == "event.get" {
 			column = "name"
 		}
-		// Zabbix binds the value and wraps it in wildcards, so this is a
-		// substring filter rather than a pattern language. A caller who writes
-		// "*agent*" gets rows containing literal asterisks, which is to say
-		// none, so the stars are stripped rather than passed through to produce
-		// a confident empty result.
+		// Zabbix wraps the value in wildcards itself; literal "*" would match
+		// nothing, so strip it.
 		//
-		// On trigger.get the search runs against the stored description, while
-		// expandDescription resolves macros only in what comes back. So a
-		// trigger displayed as "Zabbix agent is not available on node01" is
-		// stored as "... on {HOST.NAME}", and matching the literal part works
-		// while matching the hostname does not. Filter by host instead.
+		// trigger.get searches the stored description, where the host is still
+		// a macro ("... on {HOST.NAME}"), so matching a hostname fails. Filter
+		// by host instead.
 		params["search"] = map[string]any{column: strings.Trim(step.Match, "*")}
 	}
 	if step.Severity != "" {
@@ -423,8 +401,8 @@ func applySelectors(params map[string]any, method string, step broker.RouteStep)
 
 // countMatching asks Zabbix how many rows match, without fetching any.
 //
-// countOutput is answered from the database and has no row ceiling of its own,
-// which is the whole reason to prefer it over counting what came back.
+// countOutput is answered from the database with no row ceiling, unlike
+// counting what came back.
 func (c *ZabbixConnector) countMatching(ctx context.Context, method string, params map[string]any) (int, error) {
 	countParams := make(map[string]any, len(params)+1)
 	for key, value := range params {
@@ -464,18 +442,11 @@ func (c *ZabbixConnector) countMatching(ctx context.Context, method string, para
 // compareAgainstNoTimeBound reports how many problems match once the time bound
 // is removed.
 //
-// A bound on trigger.get is applied to lastchange, so what it selects is
-// "changed state inside the window and is still firing". A problem that began
-// before the window and is still firing is excluded by it -- and its absence
-// reads as health. Asked whether any host had lost its Zabbix agent since 05:00,
-// the model bounded a current-state query to today and answered "no host has
-// lost its Zabbix agent" while 19 were down; the same query without the bound
-// returned all 19.
-//
-// This is the trap fleet.inventory refuses outright. It cannot be refused here,
-// because "what started failing today" is a real question and this is how it is
-// asked. So the comparison is computed instead: the model is told what it
-// filtered out, rather than being left to infer it from a zero.
+// A bound on trigger.get applies to lastchange, so it selects "changed state
+// in the window and still firing". A problem that started earlier and is
+// still firing is excluded, and its absence reads as health. "What started
+// failing today" is a real question, so the bound can't be refused as
+// fleet.inventory does; instead the model is told what it filtered out.
 func (c *ZabbixConnector) compareAgainstNoTimeBound(ctx context.Context, evidence *Evidence, method string, params map[string]any, bounded int) error {
 	unbounded := make(map[string]any, len(params))
 	for key, value := range params {
@@ -503,15 +474,9 @@ func (c *ZabbixConnector) compareAgainstNoTimeBound(ctx context.Context, evidenc
 
 // hostCensus counts matching rows by host.
 //
-// It runs only when the page is short of the population, because that is the
-// only time it changes an answer: when every matching row is already in the
-// evidence, a model can be trusted to read the hosts off them, and the extra
-// round trip buys nothing.
-//
-// The subset it examines is the most recent maxHostCensusRows, ordered
-// explicitly rather than left to the server, so that a capped census can be
-// described precisely instead of being reported as though it covered
-// everything.
+// It runs only when the page is short of the population; otherwise the hosts
+// are already in the evidence. It examines the most recent maxHostCensusRows,
+// ordered explicitly, so a capped census can say exactly what it covered.
 func (c *ZabbixConnector) hostCensus(ctx context.Context, method string, params map[string]any) (map[string]int, int, error) {
 	censusParams := make(map[string]any, len(params))
 	for key, value := range params {
@@ -566,9 +531,7 @@ func (c *ZabbixConnector) hostCensus(ctx context.Context, method string, params 
 
 // topHosts trims a host census to the busiest maxBreakdownHosts entries.
 //
-// Ties are broken by name so that two runs over the same data produce the same
-// table; an aggregate that reshuffles between runs invites a reader to see
-// movement that is not there.
+// Ties break by name so the same data gives the same table every run.
 func topHosts(counts map[string]int) map[string]int {
 	if len(counts) <= maxBreakdownHosts {
 		return counts
@@ -594,18 +557,9 @@ func topHosts(counts map[string]int) map[string]int {
 	return trimmed
 }
 
-// attachHostBreakdown runs the host census and records it, together with a
-// warning whenever the census itself was capped -- because a partial breakdown
-// presented as a whole one is a more convincing wrong answer than no breakdown
-// at all.
-// countHostsInPage fills hosts_affected from the returned rows.
-//
-// It is exact only when the page holds every matching row, which is the one
-// case the host census deliberately skips. Asked which hosts had lost their
-// agent, a model was handed 19 complete rows, counted the distinct hosts by
-// eye, and reported "19 triggers" above a list of 14 names without reconciling
-// them. Nothing was wrong and the answer still had to be puzzled over; the
-// count is free here.
+// countHostsInPage fills hosts_affected from the returned rows. It is used
+// only when the page holds every matching row (the case hostCensus skips), so
+// the count is exact.
 func countHostsInPage(evidence *Evidence) {
 	hosts := make(map[string]struct{}, len(evidence.Items))
 	for _, item := range evidence.Items {
@@ -616,6 +570,9 @@ func countHostsInPage(evidence *Evidence) {
 	evidence.Summary["hosts_affected"] = len(hosts)
 }
 
+// attachHostBreakdown runs the host census and records it, with a warning
+// whenever the census was capped: a partial breakdown presented as whole is
+// worse than none.
 func (c *ZabbixConnector) attachHostBreakdown(ctx context.Context, evidence *Evidence, method string, params map[string]any, total int) error {
 	counts, examined, err := c.hostCensus(ctx, method, params)
 	if err != nil {
@@ -633,11 +590,8 @@ func (c *ZabbixConnector) attachHostBreakdown(ctx context.Context, evidence *Evi
 			maxBreakdownHosts, len(counts)))
 	}
 	if examined >= maxHostCensusRows && total > examined {
-		// hosts_affected is derived from the same capped fetch, so it is a
-		// floor too. Naming only the per-host counts here left the more
-		// quotable number looking exact: "29 hosts affected" is the sentence a
-		// reader repeats, and a host whose only rows fell outside the window is
-		// missing from it entirely.
+		// hosts_affected comes from the same capped fetch, so it is a lower
+		// bound too, and it is the number a reader quotes.
 		evidence.Warnings = append(evidence.Warnings, fmt.Sprintf(
 			"events_by_host and hosts_affected cover the most recent %d rows, not all %d that matched; "+
 				"both the per-host counts and the count of hosts are lower bounds, "+
@@ -667,11 +621,9 @@ func windowOf(step broker.RouteStep) (time.Time, time.Time, error) {
 // census asks how many rows match the same filters, and how they break down by
 // severity.
 //
-// It fetches only the priority column for every matching row and counts them
-// here. That is one round trip rather than the countOutput call it replaces,
-// and it buys the difference between "844 alerts today" and "844 alerts today,
-// three of them disaster". Counting severities among the returned page instead
-// describes the page, which is not what a reader asked about.
+// It fetches only the priority column of every matching row and counts here:
+// one round trip that gives both the total and the severity split over all
+// rows, not just the page.
 func (c *ZabbixConnector) census(ctx context.Context, method string, params map[string]any) (int, map[string]int, error) {
 	censusParams := make(map[string]any, len(params))
 	for key, value := range params {
@@ -710,12 +662,8 @@ func (c *ZabbixConnector) census(ctx context.Context, method string, params map[
 	}
 
 	if len(envelope.Result) >= maxCensusRows {
-		// The fetch hit its own ceiling, so len() is the cap rather than the
-		// count. Live Zabbix had 21,296 events since 05:00 one morning against
-		// a 20,000-row census, which would have been reported as a total of
-		// exactly 20,000 -- a round number that is a limit wearing the costume
-		// of a measurement, and the severity breakdown under it would have
-		// described 20,000 of them as though it described all.
+		// The fetch hit its ceiling, so len() is the cap, not the count.
+		// Count exactly instead.
 		return c.exactCensus(ctx, method, params)
 	}
 
@@ -737,10 +685,8 @@ func (c *ZabbixConnector) census(ctx context.Context, method string, params map[
 // exactCensus counts each severity separately with countOutput, which Zabbix
 // answers from the database without returning rows and so without any ceiling.
 //
-// It costs one round trip per severity, which is why it runs only when the row
-// census overflows. Severities partition the result -- every event carries
-// exactly one -- so their sum is the exact total, and no separate total call is
-// needed.
+// It costs one round trip per severity, so it runs only when the row census
+// overflows. Every event has exactly one severity, so the sum is the total.
 func (c *ZabbixConnector) exactCensus(ctx context.Context, method string, params map[string]any) (int, map[string]int, error) {
 	column := "priority"
 	if method == "event.get" {
@@ -783,13 +729,8 @@ func (c *ZabbixConnector) hostExists(ctx context.Context, host string) (bool, er
 	return len(ids) > 0, nil
 }
 
-// resolveHostIDs turns a host name into the ids event.get will actually filter
-// on. It already existed inside hostExists, which resolved the id and threw it
-// away; the throwing away is why event.get was handed a name it cannot use.
-//
-// An empty result is not an error here. The caller decides what absence means:
-// for a trigger count it is "the host may not exist", and for event history it
-// is a refusal.
+// resolveHostIDs turns a host name into the ids event.get filters on. An empty
+// result is not an error; the caller decides what absence means.
 func (c *ZabbixConnector) resolveHostIDs(ctx context.Context, host string) ([]string, error) {
 	payload, err := c.rawCall(ctx, "host.get", map[string]any{
 		"filter": map[string]any{"host": []string{host}},
@@ -937,9 +878,7 @@ func normalizeTriggers(triggers []zabbixTrigger) []EvidenceItem {
 			State:       state,
 		}
 		if trigger.LastChange != "" {
-			// Zabbix reports epoch seconds. Passing that through unchanged
-			// invites a model to repeat the raw integer at a reader, so it is
-			// rendered here instead.
+			// Render epoch seconds so the model doesn't repeat raw integers.
 			item.Fields = map[string]string{"last_change": formatEpoch(trigger.LastChange)}
 		}
 		items = append(items, item)
@@ -960,9 +899,7 @@ func redactEndpoint(endpoint string) string {
 // summarizeTriggers counts problems by severity so a model never has to tally
 // them itself.
 func summarizeTriggers(items []EvidenceItem, totalMatching int, severities map[string]int) map[string]int {
-	// Severity counts describe every matching row, not the returned page. A
-	// breakdown of the page answers a question nobody asked: a reader wants to
-	// know how many of the 844 are disasters, not how many of the 25 shown are.
+	// Severity counts describe every matching row, not the returned page.
 	summary := map[string]int{
 		"returned":       len(items),
 		"total_matching": totalMatching,

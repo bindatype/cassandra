@@ -12,46 +12,39 @@ import (
 )
 
 // Running a program is a different security posture from reading a file, so
-// the surface is drawn as narrowly as it can be and still be useful:
+// the surface is drawn narrowly:
 //
-//   - Every argument below is a compile-time constant. Nothing a model sends
-//     reaches a command line, so there is no parameter to validate and no
-//     injection class to defend against. This is the whole reason these
-//     operations take no target.
-//   - No shell. exec.CommandContext with an absolute path means `;`, `&&`,
-//     `|` and backticks are inert bytes, not syntax.
-//   - The environment is emptied rather than inherited, so nothing in cassd's
-//     environment steers a child's behaviour.
-//   - Output is capped at the agent. A command that floods is cut here, not at
-//     the reader.
+//   - Every argument is a compile-time constant. Nothing a model sends reaches
+//     a command line, which is why these operations take no target.
+//   - No shell: exec with an absolute path, so `;`, `|` and backticks are inert.
+//   - The environment is emptied, not inherited.
+//   - Output is capped here, not at the reader.
 //
-// A binary here must be labelled bin_t. Anything else carries an SELinux domain
-// transition, and DynamicUser=yes implies NoNewPrivileges=yes, which forbids a
-// transition that is not bounded -- the exec is denied and the service exits
-// 203 before the program runs. /usr/sbin/ip (ifconfig_exec_t) and /usr/bin/dmesg
-// (dmesg_exec_t) both do this; uptime, df and ss are bin_t and do not.
+// cassd's sandbox decides what actually works, and only the hardened unit
+// shows it; tests running the agent as an ordinary user won't:
 //
-// host.network was shipped running `ip` and was broken under enforcing from the
-// moment it landed. It passed because it was tested with the agent run as an
-// ordinary user rather than as a hardened unit, which is the one difference
-// that decided it. It is now native netlink; see network.go.
+//   - A binary must be labelled bin_t. Any other label needs an SELinux domain
+//     transition, which NoNewPrivileges (implied by DynamicUser=yes) forbids,
+//     and the service exits 203. /usr/sbin/ip and /usr/bin/dmesg are not
+//     bin_t; uptime, df and ss are. (host.network therefore uses netlink; see
+//     network.go.)
+//   - kernel.messages needs the ring buffer, so the shipped unit sets
+//     ProtectKernelLogs=no. kernel.dmesg_restrict=1 still blocks it.
+//   - host.gpu needs /dev/nvidia*, which PrivateDevices=yes hides. Enabling it
+//     means BindPaths= plus DevicePolicy=closed and a DeviceAllow= line per
+//     node, with the node set checked on the target host (ls -la
+//     /dev/nvidia*), not PrivateDevices=no.
+//   - ProtectProc=invisible hides other users' processes, so ss has no -p and
+//     process.list refuses a filtered view.
 //
-// Deliberately absent: journalctl, dmesg, ps and ss. Each returns empty or
-// partial output under cassd's current sandbox -- ProtectKernelLogs blocks the
-// ring buffer, ProtectProc=invisible hides other processes, and an empty
-// SupplementaryGroups excludes systemd-journal. Shipping them would mean
-// exit code 0 with a well-formed answer describing almost nothing, which is
-// worse than not having them. They wait on a deliberate privilege grant.
+// kernel.messages and host.gpu are implemented but not enabled by default.
+// journalctl is absent: an empty SupplementaryGroups excludes
+// systemd-journal, and a well-formed empty answer is worse than none.
 const (
 	commandTimeout   = 10 * time.Second
 	commandMaxOutput = 64 * 1024
 )
 
-// commandStep is one program invocation. A single operation may run several,
-// because the alternative is a parameter the model can get wrong: asking only
-// `df -h` misses a filesystem that is out of inodes at 40% capacity, and
-// asking only `ip addr` misses the route that explains why a reachable-looking
-// interface answers nothing.
 // operationNotes are limits a reader would otherwise have to discover. They
 // travel with the result, because a socket list with no process column looks
 // complete rather than partial.
@@ -65,8 +58,15 @@ var operationNotes = map[string][]string{
 		"only error and warning level entries are returned, and the ring buffer holds a bounded " +
 			"window: an event older than the buffer is absent, not non-existent.",
 	},
+	operationHostGPU: {
+		"one row per physical GPU as nvidia-smi enumerates it; a GPU made invisible to this host " +
+			"by a hypervisor or MIG partitioning is absent from the count, not reported as zero.",
+	},
 }
 
+// commandStep is one program invocation. An operation may run several rather
+// than take a parameter the model could get wrong: `df -h` alone misses a
+// filesystem out of inodes at 40% capacity.
 type commandStep struct {
 	// Label names the step in the response, so a reader can tell which output
 	// came from which invocation without parsing argv.
@@ -83,25 +83,29 @@ var commandOperations = map[string][]commandStep{
 		{Label: "space", Path: "/usr/bin/df", Args: []string{"-h"}},
 		{Label: "inodes", Path: "/usr/bin/df", Args: []string{"-i"}},
 	},
-	// -p is deliberately absent. It attributes sockets to processes, but only
-	// for the calling user's own, and this agent owns almost none -- so -p
-	// would return a blank process column on a list that otherwise looks
-	// complete. Attribution needs a privilege grant; until then, saying
-	// nothing beats saying nothing convincingly.
+	// No -p: it attributes only the calling user's sockets, and this agent
+	// owns almost none, so the process column would be blank on a list that
+	// looks complete.
 	operationHostListeners: {
 		{Label: "listeners", Path: "/usr/sbin/ss", Args: []string{"-tuln"}},
 	},
-	// Blocked by ProtectKernelLogs=yes in the shipped unit, and by
-	// kernel.dmesg_restrict=1 on hosts that set it. Both failures are refusals
-	// with stderr, not empty successes, so the operation reports why.
+	// Needs ProtectKernelLogs=no (as shipped) and kernel.dmesg_restrict=0. A
+	// blocked read fails with stderr, which the operation reports.
 	operationKernelMessages: {
 		{Label: "kernel", Path: "/usr/bin/dmesg", Args: []string{"-T", "--level=err,warn"}},
 	},
+	// Blocked by PrivateDevices=yes in the shipped unit; see the top of this
+	// file. Unit-free CSV, one row per GPU, so "8000" isn't ambiguous.
+	operationHostGPU: {
+		{Label: "gpu", Path: "/usr/bin/nvidia-smi", Args: []string{
+			"--query-gpu=index,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu",
+			"--format=csv,noheader,nounits",
+		}},
+	},
 }
 
-// commandResult is one step's outcome. Every field is reported, including the
-// unhappy ones: a step that failed says so next to the steps that did not,
-// rather than being dropped from a list that then reads as complete.
+// commandResult is one step's outcome. A failed step is reported beside the
+// others, not dropped.
 type commandResult struct {
 	Label      string `json:"label"`
 	Command    string `json:"command"`
@@ -115,18 +119,15 @@ type commandResult struct {
 }
 
 // runCommandOperation executes every step of an operation and reports all of
-// them. If no step produced output the whole operation is an error, because an
-// empty success is the failure this project keeps finding: a reader cannot
-// distinguish "the machine has nothing to report" from "cassd could not look".
+// them. If no step produced output the operation is an error: an empty
+// success can't be told from "cassd could not look".
 func (s *Service) runCommandOperation(ctx context.Context, operation string) (any, bool, *APIError) {
 	steps, known := commandOperations[operation]
 	if !known {
 		return nil, false, newAPIError(400, "unknown_operation", "operation is not supported")
 	}
 
-	// A missing binary is refused before anything runs, and the refusal names
-	// the path. "command not found" buried in a step's stderr would read as
-	// the machine having nothing to say.
+	// A missing binary is refused up front, naming the path.
 	for _, step := range steps {
 		if _, err := os.Stat(step.Path); err != nil {
 			return nil, false, newAPIError(503, "command_unavailable",
@@ -145,9 +146,8 @@ func (s *Service) runCommandOperation(ctx context.Context, operation string) (an
 	}
 
 	if !anyOutput {
-		// Name the cause rather than only the symptom. dmesg refused by
-		// ProtectKernelLogs and dmesg on a quiet machine both produce no
-		// output, and the stderr is the only thing that tells them apart.
+		// Keep stderr: a blocked dmesg and a quiet machine both produce no
+		// output, and stderr tells them apart.
 		detail := "every step ran and none produced output"
 		for _, result := range results {
 			if result.Failure != "" || result.Stderr != "" {
@@ -182,8 +182,7 @@ func (s *Service) runCommandStep(ctx context.Context, step commandStep) commandR
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, step.Path, step.Args...)
-	// Empty, not inherited. A child's behaviour must not depend on what was in
-	// cassd's environment.
+	// Empty, not inherited.
 	cmd.Env = []string{}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
