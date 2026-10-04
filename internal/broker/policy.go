@@ -119,6 +119,39 @@ func validateOwnerSelector(owner string) error {
 	return nil
 }
 
+const (
+	maxQueueSelectorLen = 64
+	maxQueueSelectors   = 20
+)
+
+// validateQueueSelectors checks the shape of requested queue names. Whether
+// each is allowlisted is the connector's check: the allowlist is its
+// configuration, not the broker's.
+func validateQueueSelectors(queues []string) error {
+	if len(queues) > maxQueueSelectors {
+		return fmt.Errorf("at most %d queues per call", maxQueueSelectors)
+	}
+	seen := make(map[string]bool, len(queues))
+	for _, queue := range queues {
+		if queue == "" || len(queue) > maxQueueSelectorLen || strings.TrimSpace(queue) != queue {
+			return fmt.Errorf("each queue must be one RT queue name of 1-%d characters, as a separate list item", maxQueueSelectorLen)
+		}
+		for _, char := range queue {
+			if unicode.IsLetter(char) || unicode.IsDigit(char) || strings.ContainsRune(" .-_", char) {
+				continue
+			}
+			return fmt.Errorf("queue %q contains an unsupported character; give each queue as its own list item, "+
+				"using only letters, digits, spaces, '.', '-' and '_'", queue)
+		}
+		key := strings.ToLower(queue)
+		if seen[key] {
+			return fmt.Errorf("queue %q is listed twice", queue)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
 func validateHostSelector(host string) error {
 	if host == "" || len(host) > maxHostSelectorLen || strings.TrimSpace(host) != host {
 		return fmt.Errorf("host must contain 1-%d non-whitespace characters", maxHostSelectorLen)

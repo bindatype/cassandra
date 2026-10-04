@@ -104,6 +104,22 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 		}
 	}
 
+	if len(request.Queues) > 0 || request.Status != "" {
+		switch request.Intent {
+		case IntentTicketsOpen, IntentTicketsByHost:
+			if err := validateQueueSelectors(request.Queues); err != nil {
+				return RoutePlan{}, newRouteError("invalid_queue", err.Error())
+			}
+			if request.Status != "" && request.Status != TicketStatusActive {
+				return RoutePlan{}, newRouteError("invalid_request", fmt.Sprintf(
+					"status must be %s or omitted; omitted means new, open and stalled", TicketStatusActive))
+			}
+		default:
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s does not accept queues or status; they apply to tickets.open and tickets.for_host", request.Intent))
+		}
+	}
+
 	switch request.Intent {
 	case IntentFleetInventory:
 		if request.Host != "" || request.Resource != "" {
@@ -249,6 +265,8 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Until:  untilValue,
 			Owner:  request.Owner,
 			Order:  request.Order,
+			Queues: request.Queues,
+			Status: request.Status,
 		}), nil
 
 	case IntentTicketsByHost:
@@ -264,6 +282,8 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Until:  untilValue,
 			Owner:  request.Owner,
 			Order:  request.Order,
+			Queues: request.Queues,
+			Status: request.Status,
 		}), nil
 
 	default:
@@ -418,11 +438,14 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 		}
 		return requests
 
-	case IntentTicketsOpen:
-		return []RouteRequest{{Intent: plan.Intent, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner, Order: plan.Steps[0].Order}}
-
-	case IntentTicketsByHost:
-		return []RouteRequest{{Intent: plan.Intent, Host: host, Since: plan.Steps[0].Since, Until: plan.Steps[0].Until, Owner: plan.Steps[0].Owner, Order: plan.Steps[0].Order}}
+	case IntentTicketsOpen, IntentTicketsByHost:
+		step := plan.Steps[0]
+		request := RouteRequest{Intent: plan.Intent, Since: step.Since, Until: step.Until, Owner: step.Owner,
+			Order: step.Order, Queues: step.Queues, Status: step.Status}
+		if plan.Intent == IntentTicketsByHost {
+			request.Host = host
+		}
+		return []RouteRequest{request}
 
 	default:
 		return nil

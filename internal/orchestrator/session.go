@@ -165,6 +165,20 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 							"first). Set oldest_first for \"the oldest tickets created in the last N days\": since: Nd " +
 							"with order: oldest_first.",
 					},
+					"queues": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+						"description": "For tickets.open and tickets.for_host only: search just these Request Tracker " +
+							"queues, one name per item, e.g. [\"rtshelp\", \"hpchelp\"]. Omit for every allowlisted " +
+							"queue. A question that names queues sets this; never filter a page of all queues yourself.",
+					},
+					"status": map[string]any{
+						"type": "string",
+						"enum": []string{broker.TicketStatusActive},
+						"description": "For tickets.open and tickets.for_host only. Omit for new, open and stalled. " +
+							"Set active when the question says \"active\": RT's __Active__, which follows each queue's " +
+							"own lifecycle and can include statuses other than those three.",
+					},
 					"match": map[string]any{
 						"type": "string",
 						"description": "Narrow monitoring evidence to problems whose name contains this text, " +
@@ -700,7 +714,7 @@ func isRetryableRouteError(err error) bool {
 	switch routeErr.Code {
 	case "invalid_request", "invalid_query", "invalid_since", "invalid_until", "missing_since",
 		"invalid_limit", "invalid_match", "invalid_severity", "invalid_state",
-		"invalid_host", "invalid_owner", "invalid_resource",
+		"invalid_host", "invalid_owner", "invalid_queue", "invalid_resource",
 		"missing_host", "missing_resource", "unknown_intent":
 		return true
 	default:

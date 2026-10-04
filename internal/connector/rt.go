@@ -156,7 +156,12 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		return Evidence{}, err
 	}
 
-	query := ticketSearchQuery(step.Host, step.Owner, since, until, c.queues)
+	queues, err := c.selectQueues(step.Queues)
+	if err != nil {
+		return Evidence{}, err
+	}
+	filter := ticketFilter{host: step.Host, owner: step.Owner, status: step.Status, since: since, until: until, queues: queues}
+	query := ticketSearchQuery(filter)
 	requestedAt := time.Now().UTC()
 	order := ticketOrder(since, until, step.Owner, step.Order)
 	items, total, err := c.search(ctx, query, limit, order)
@@ -177,6 +182,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		Since:          step.Since,
 		Until:          step.Until,
 		Owner:          step.Owner,
+		Status:         step.Status,
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -200,12 +206,16 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 			len(items), orderingDescription(order), total, missing))
 	}
 
-	if len(c.queues) > maxRTQueueCensus {
+	if len(step.Queues) > 0 {
+		evidence.Queues = queues
+	}
+
+	if len(queues) > maxRTQueueCensus {
 		evidence.Warnings = append(evidence.Warnings, fmt.Sprintf(
-			"tickets_by_queue was not computed: %d queues are configured, more than the %d this connector "+
-				"will fan a single search out across", len(c.queues), maxRTQueueCensus))
+			"tickets_by_queue was not computed: %d queues are searched, more than the %d this connector "+
+				"will fan a single search out across", len(queues), maxRTQueueCensus))
 	} else {
-		breakdown, err := c.queueCensus(ctx, step.Host, step.Owner, since, until)
+		breakdown, err := c.queueCensus(ctx, filter)
 		if err != nil {
 			return Evidence{}, err
 		}
@@ -216,7 +226,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 		// A misspelled login and an owner with nothing open both come back
 		// empty, and this token cannot look users up to tell them apart.
 		evidence.Warnings = append(evidence.Warnings, fmt.Sprintf(
-			"no open tickets owned by %q match this search in the allowlisted queues; an RT login that "+
+			"no open tickets owned by %q match this search in the searched queues; an RT login that "+
 				"does not exist, or is spelled differently, returns this same empty result, so check the "+
 				"spelling against tickets_by_owner before reporting that this owner has none", step.Owner))
 	}
@@ -227,7 +237,7 @@ func (c *RTConnector) Execute(ctx context.Context, step broker.RouteStep) (Evide
 	// under an owner filter, where it would only restate total_matching.
 	owners, ownersCapped := ownersOnPage(items)
 	if step.Owner == "" && len(owners) > 0 {
-		breakdown, oldest, err := c.ownerCensus(ctx, owners, step.Host, since, until)
+		breakdown, oldest, err := c.ownerCensus(ctx, owners, filter)
 		if err != nil {
 			return Evidence{}, err
 		}
@@ -344,13 +354,15 @@ func (c *RTConnector) search(ctx context.Context, query string, limit int, order
 	return items, envelope.Total, nil
 }
 
-// queueCensus counts matching tickets per allowlisted queue, at one round trip
+// queueCensus counts matching tickets per searched queue, at one round trip
 // per queue (bounded by maxRTQueueCensus).
-func (c *RTConnector) queueCensus(ctx context.Context, host, owner, since, until string) (map[string]int, error) {
-	counts := make(map[string]int, len(c.queues))
-	for _, queue := range c.queues {
+func (c *RTConnector) queueCensus(ctx context.Context, filter ticketFilter) (map[string]int, error) {
+	counts := make(map[string]int, len(filter.queues))
+	for _, queue := range filter.queues {
 		values := url.Values{}
-		values.Set("query", ticketSearchQuery(host, owner, since, until, []string{queue}))
+		one := filter
+		one.queues = []string{queue}
+		values.Set("query", ticketSearchQuery(one))
 		values.Set("per_page", "1")
 
 		body, status, err := c.get(ctx, "/REST/2.0/tickets", values)
@@ -399,12 +411,14 @@ func ownersOnPage(items []EvidenceItem) (owners []string, capped bool) {
 // ownerCensus counts matching tickets per discovered owner, one narrowed
 // search each, as queueCensus does. Each search returns one ticket sorted
 // oldest first, so it also yields that owner's oldest ticket at no extra cost.
-func (c *RTConnector) ownerCensus(ctx context.Context, owners []string, host, since, until string) (map[string]int, map[string]EvidenceItem, error) {
+func (c *RTConnector) ownerCensus(ctx context.Context, owners []string, filter ticketFilter) (map[string]int, map[string]EvidenceItem, error) {
 	counts := make(map[string]int, len(owners))
 	oldest := make(map[string]EvidenceItem, len(owners))
 	for _, owner := range owners {
 		values := url.Values{}
-		values.Set("query", ticketSearchQuery(host, owner, since, until, c.queues))
+		one := filter
+		one.owner = owner
+		values.Set("query", ticketSearchQuery(one))
 		values.Set("fields", rtSearchFields)
 		values.Set(rtQueueNameField, "Name")
 		values.Set("per_page", "1")
@@ -478,13 +492,52 @@ func rtStatusError(status int, body []byte) error {
 	return newConnectorError("http_status", fmt.Sprintf("rt returned HTTP %d: %s", status, message))
 }
 
+// selectQueues returns the queues a step searches: every allowlisted queue
+// when it names none, otherwise the named ones, each of which must be on the
+// allowlist. Names match case-insensitively, as RT's do, and are returned in
+// the allowlist's spelling.
+func (c *RTConnector) selectQueues(requested []string) ([]string, error) {
+	if len(requested) == 0 {
+		return c.queues, nil
+	}
+	selected := make([]string, 0, len(requested))
+	for _, queue := range requested {
+		found := ""
+		for _, allowed := range c.queues {
+			if strings.EqualFold(queue, allowed) {
+				found = allowed
+				break
+			}
+		}
+		if found == "" {
+			return nil, newConnectorError("queue_not_allowed", fmt.Sprintf(
+				"queue %q is not on this deployment's allowlist; the searchable queues are %s",
+				queue, strings.Join(c.queues, ", ")))
+		}
+		selected = append(selected, found)
+	}
+	return selected, nil
+}
+
+// ticketFilter is everything one ticket search narrows by. since and until
+// are RT date literals from rtDateBound; empty fields do not narrow.
+type ticketFilter struct {
+	host, owner, status, since, until string
+	queues                            []string
+}
+
 // ticketSearchQuery builds RT's TicketSQL here, from values that already
 // passed broker policy and the operator's queue allowlist; no model or plan
-// supplies the string. An empty owner means every owner. since and until are
-// RT date literals from rtDateBound.
-func ticketSearchQuery(host, owner, since, until string, queues []string) string {
-	// RT's active statuses. Resolved, rejected and deleted are excluded.
+// supplies the string.
+func ticketSearchQuery(filter ticketFilter) string {
+	host, owner, since, until, queues := filter.host, filter.owner, filter.since, filter.until, filter.queues
+	// By default new, open and stalled. __Active__ is RT's own set, which
+	// follows each queue's lifecycle. Either way resolved, rejected and
+	// deleted are excluded.
 	parts := []string{"(Status = 'new' OR Status = 'open' OR Status = 'stalled')"}
+	if filter.status == broker.TicketStatusActive {
+		parts[0] = "Status = '__Active__'"
+	}
 	if len(queues) > 0 {
 		queueParts := make([]string, 0, len(queues))
 		for _, queue := range queues {

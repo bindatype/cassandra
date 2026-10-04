@@ -67,10 +67,13 @@ Logins are written exactly as Cassandra shows them, e.g. `aklwong@gwu.edu`.
   of the N oldest tickets. Ask for "the N oldest" with an age bound.
 - **An unbounded "oldest tickets" question sees the newest page.** Give an
   age bound.
-- **Which queues are searched is Cassandra's configuration**, currently
-  hpchelp, rtshelp, change, redcaphelp, alerts and lustrepurge. A person
-  searching RT across all queues, or with `Status = '__Active__'`, can get a
-  different count. Say which queues the answer covers when comparing.
+- **Name the queues you mean.** Cassandra searches only the queues it is
+  configured for (currently hpchelp, rtshelp, change, redcaphelp, alerts and
+  lustrepurge), all of them unless the question names some: ask "in rtshelp
+  and hpchelp", don't ask for everything and pick those out yourself.
+- **"Open" and "active" differ.** "Open" is new, open or stalled; "active" is
+  RT's `__Active__`, which follows each queue's lifecycle. Use the word the
+  person used, and say which one the answer covers when comparing with RT.
 - **There are no requesters.** The owner is the assigned staff member, not
   the person who filed the ticket.
 - **Zero tickets for a login may be a typo.** Check the spelling against the

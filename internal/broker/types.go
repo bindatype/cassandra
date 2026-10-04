@@ -98,6 +98,14 @@ type RouteRequest struct {
 	// or newest_first. Without it the bound decides; it is needed for "the
 	// oldest tickets created in the last N days" (since plus oldest_first).
 	Order string `json:"order,omitempty"`
+	// Queues narrows ticket evidence to some of the allowlisted RT queues.
+	// Empty means every allowlisted queue; a queue outside the allowlist is
+	// refused by the connector, which holds the allowlist.
+	Queues []string `json:"queues,omitempty"`
+	// Status picks which tickets count as open. Empty is new, open and
+	// stalled; TicketStatusActive is RT's __Active__, which follows each
+	// queue's own lifecycle.
+	Status string `json:"status,omitempty"`
 }
 
 // Ticket page orderings a request may ask for explicitly.
@@ -105,6 +113,11 @@ const (
 	TicketOrderOldestFirst = "oldest_first"
 	TicketOrderNewestFirst = "newest_first"
 )
+
+// TicketStatusActive selects RT's __Active__ statuses instead of the default
+// new, open and stalled. A queue with its own lifecycle can have active
+// statuses that are none of those three.
+const TicketStatusActive = "active"
 
 type RoutePlan struct {
 	Version int         `json:"version"`
@@ -126,6 +139,8 @@ type RouteStep struct {
 	State     string           `json:"state,omitempty"`
 	Owner     string           `json:"owner,omitempty"`
 	Order     string           `json:"order,omitempty"`
+	Queues    []string         `json:"queues,omitempty"`
+	Status    string           `json:"status,omitempty"`
 	Target    *OperationTarget `json:"target,omitempty"`
 	Params    *OperationParams `json:"params,omitempty"`
 }

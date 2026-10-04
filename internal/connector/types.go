@@ -33,6 +33,10 @@ type Evidence struct {
 	State    string `json:"state,omitempty"`
 	Host     string `json:"host_filter,omitempty"`
 	Owner    string `json:"owner_filter,omitempty"`
+	// Queues and Status are set only when the request narrowed them; absent
+	// means every allowlisted queue and new/open/stalled.
+	Queues []string `json:"queue_filter,omitempty"`
+	Status string   `json:"status_filter,omitempty"`
 	// Ordering says which end of the matching set a truncated page came from.
 	// Without it a newest-first page reads as representative, and "oldest"
 	// gets answered from the newest rows.

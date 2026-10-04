@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -260,21 +261,21 @@ func TestRTConnectorSkipsQueueCensusWhenAllowlistIsLarge(t *testing.T) {
 }
 
 func TestTicketSearchQueryEscapesQuotes(t *testing.T) {
-	query := ticketSearchQuery("o'brien", "", "", "", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{host: "o'brien", queues: []string{"Ops"}})
 	if !strings.Contains(query, `Subject LIKE 'o\'brien'`) {
 		t.Errorf("query = %q, want an escaped quote", query)
 	}
 }
 
 func TestTicketSearchQueryFiltersByOwner(t *testing.T) {
-	query := ticketSearchQuery("", "jcreech@gwu.edu", "", "", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{owner: "jcreech@gwu.edu", queues: []string{"Ops"}})
 	if !strings.Contains(query, "Owner = 'jcreech@gwu.edu'") {
 		t.Errorf("query = %q, want an Owner filter", query)
 	}
 }
 
 func TestTicketSearchQueryAddsCreatedBounds(t *testing.T) {
-	query := ticketSearchQuery("", "", "2026-01-01 00:00:00", "2026-07-04 00:00:00", []string{"Ops"})
+	query := ticketSearchQuery(ticketFilter{since: "2026-01-01 00:00:00", until: "2026-07-04 00:00:00", queues: []string{"Ops"}})
 	if !strings.Contains(query, "Created > '2026-01-01 00:00:00'") {
 		t.Errorf("query = %q, want a Created lower bound", query)
 	}
@@ -784,5 +785,77 @@ func TestRTConnectorOwnerFilterWithNoTicketsSaysWhy(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("warnings = %v, want one saying an unknown login also returns nothing", evidence.Warnings)
+	}
+}
+
+func TestTicketSearchQueryUsesActiveOnlyWhenAsked(t *testing.T) {
+	plain := ticketSearchQuery(ticketFilter{queues: []string{"Ops"}})
+	if !strings.Contains(plain, "(Status = 'new' OR Status = 'open' OR Status = 'stalled')") || strings.Contains(plain, "__Active__") {
+		t.Errorf("default query = %q, want new/open/stalled", plain)
+	}
+	active := ticketSearchQuery(ticketFilter{status: broker.TicketStatusActive, queues: []string{"Ops"}})
+	if !strings.Contains(active, "Status = '__Active__'") || strings.Contains(active, "Status = 'new'") {
+		t.Errorf("active query = %q, want only Status = '__Active__'", active)
+	}
+}
+
+// Named queues narrow every search the step makes -- the page, the queue
+// census and the owner census -- not only the page.
+func TestRTConnectorSearchesOnlyTheNamedQueues(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		w.Write([]byte(`{"total":1,"items":[
+			{"id":"7","Subject":"s","Status":"open","Queue":"hpchelp","Owner":"alice","Created":"2025-01-01T00:00:00Z","LastUpdated":"2025-01-02T00:00:00Z"}
+		]}`))
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"hpchelp", "rtshelp", "alerts"})
+	evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Queues: []string{"RTSHELP", "hpchelp"},
+		Status: broker.TicketStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(queries) == 0 {
+		t.Fatal("no search was made")
+	}
+	for _, query := range queries {
+		if strings.Contains(query, "'alerts'") {
+			t.Errorf("query %q searched a queue that was not asked for", query)
+		}
+		if !strings.Contains(query, "Status = '__Active__'") {
+			t.Errorf("query %q lost the active status", query)
+		}
+	}
+	if !strings.Contains(queries[0], "Queue = 'rtshelp'") || !strings.Contains(queries[0], "Queue = 'hpchelp'") {
+		t.Errorf("page query = %q, want both named queues in the allowlist's spelling", queries[0])
+	}
+	if _, ok := evidence.Breakdown["tickets_by_queue"]["alerts"]; ok {
+		t.Error("tickets_by_queue counted a queue that was not asked for")
+	}
+	if !reflect.DeepEqual(evidence.Queues, []string{"rtshelp", "hpchelp"}) || evidence.Status != broker.TicketStatusActive {
+		t.Errorf("evidence records queues %v status %q, want the applied filter", evidence.Queues, evidence.Status)
+	}
+}
+
+func TestRTConnectorRefusesAQueueOffTheAllowlist(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("RT was asked about a queue outside the allowlist")
+	}))
+	defer server.Close()
+
+	connector := newTestRT(t, server.URL, []string{"hpchelp", "rtshelp"})
+	_, err := connector.Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceRequestTracker,
+		Action: "tickets.search",
+		Queues: []string{"hpchelp", "payroll"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "payroll") || !strings.Contains(err.Error(), "hpchelp, rtshelp") {
+		t.Fatalf("Execute() error = %v, want a refusal naming the queue and the searchable ones", err)
 	}
 }

@@ -50,7 +50,7 @@ A truncated result carries a warning saying so. Every figure then describes what
 
 ## Request Tracker tickets
 
-`tickets.open` and `tickets.for_host` report tickets in RT's active statuses -- `new`, `open`, and `stalled` -- never resolved, rejected, or deleted ones, and only in queues an operator has allowlisted; a queue that exists in RT but is not in that allowlist is invisible to you, and its absence from an answer does not mean it has no open tickets. Neither intent takes `match`, `severity`, `state`, or `limit`.
+`tickets.open` and `tickets.for_host` report tickets in statuses `new`, `open`, and `stalled` unless `status: active` asks for RT's own `__Active__` set -- never resolved, rejected, or deleted ones -- and only in queues an operator has allowlisted; a queue that exists in RT but is not in that allowlist is invisible to you, and its absence from an answer does not mean it has no open tickets. Neither intent takes `match`, `severity`, `state`, or `limit`.
 
 Both accept `since` and `until`, but here they bound a ticket's **Created** date, never its open/closed status. That is a different kind of bound than the trap on `fleet.inventory` or `monitoring.problems`: a ticket's creation date cannot change, so narrowing by it only selects which still-open tickets to look at -- it can never make a ticket that is genuinely open disappear from the count the way bounding current state can. Use it for "how many open tickets are older than N days" or "opened this month" -- ask for RT's own exact count with the bound applied, rather than pulling a page of tickets and reading `created` dates off it by eye. `total_matching`, `tickets_by_queue` and `tickets_by_owner` already reflect the bound once applied; do not additionally filter or count the returned `items` yourself.
 
@@ -66,7 +66,7 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 **Report a ticket's `age_days` field directly; never compute its age from `created` yourself.** It is measured in Go from RT's own Created timestamp at request time, so it is exact. Asked live for the same ticket's age in days twice, minutes apart, computing it by eye produced 1719 once and 1354 the next -- an error of nearly a year, on an actual morning-digest answer. `age_days` cannot make that mistake; your own arithmetic already has.
 <!-- /rule -->
 
-`summary.total_matching` is Request Tracker's own count for the query, not a page-limited estimate. `breakdown.tickets_by_queue` counts open matching tickets per allowlisted queue; when the allowlist is large the breakdown is skipped and a warning says so, and in that case report the total only, not a per-queue guess.
+`summary.total_matching` is Request Tracker's own count for the query, not a page-limited estimate. `breakdown.tickets_by_queue` counts open matching tickets per searched queue; when the allowlist is large the breakdown is skipped and a warning says so, and in that case report the total only, not a per-queue guess.
 
 `breakdown.tickets_by_owner`, when present, is also an exact per-owner count from Request Tracker -- **use it for "group by owner" rather than counting the `items` list.** Unlike `tickets_by_queue`, the set of owners it covers is discovered from the returned page, not from an operator-configured list, so in general it can miss an owner with no visible ticket on this page. But each count is still exact, and a ticket has exactly one owner, so **if the counts already sum to `total_matching`, the breakdown is complete** -- report it as the full distribution, with no caveat, even when `truncated` is true elsewhere in the evidence. A warning appears only when the counts do *not* sum to the total, and names how many tickets are unaccounted for; only then report the owner counts as a floor. Trust the warning's presence or absence over `truncated`, and never derive a different owner count by reading `items` yourself.
 
@@ -80,6 +80,10 @@ Both accept `since` and `until`, but here they bound a ticket's **Created** date
 
 <!-- rule:rt-order -->
 **For the oldest tickets inside a `since` bound, add `order: oldest_first`.** A `since` bound otherwise reads newest first, and a truncated page then holds none of the oldest. "The 20 oldest open tickets created in the last 365 days" is `since: 365d` with `order: oldest_first`. "Less than N days old" is always `since`, never `until`.
+<!-- /rule -->
+
+<!-- rule:rt-queues-status -->
+**When the question names queues, set `queues`; when it says "active", set `status: active`.** "The 5 oldest tickets in rtshelp and hpchelp" is `queues: ["rtshelp", "hpchelp"]` with an `until` bound. Never search every queue and pick the named ones out of the page: the page is 100 rows, and the named queues' tickets may not be on it. "Active" is RT's `__Active__`, which follows each queue's lifecycle; without `status` the search is new, open and stalled, and a question that says "active" would get that narrower set. A queue outside the allowlist is refused with the list of searchable queues; say so rather than reporting zero.
 <!-- /rule -->
 
 <!-- rule:rt-no-requester -->

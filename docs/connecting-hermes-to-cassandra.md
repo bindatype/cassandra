@@ -181,10 +181,11 @@ Start with `hermes mcp test cassandra`, then look in
 - Read-only, and only what its sources hold. Ticket metadata, never ticket
   contents.
 - RT answers cover the queues Cassandra is configured for: hpchelp, rtshelp,
-  change, redcaphelp, alerts and lustrepurge. "Open" currently means status
-  new, open or stalled. A search in the RT web interface with other queues,
-  or with `Status = '__Active__'`, can give a different count. Say which
-  queues you mean when comparing.
+  change, redcaphelp, alerts and lustrepurge. Name queues in the question
+  ("in rtshelp and hpchelp") to search only those. "Open" means status new,
+  open or stalled; say "active" to get RT's `Status = '__Active__'`, which
+  follows each queue's own lifecycle. Say which queues and which of the two
+  you mean when comparing with a search in the RT web interface.
 - Answers are internal GW IT data, subject to GW data policy. Cassandra and
   its model run locally. If you connect an agent whose model runs in the
   cloud, the answers leave GW, and that is your responsibility. The team
