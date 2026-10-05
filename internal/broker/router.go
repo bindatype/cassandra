@@ -93,6 +93,11 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 	// wide result that reads as narrow.
 	switch request.Intent {
 	case IntentMonitoringProblems, IntentMonitoringHistory:
+	case IntentInventoryProcesses, IntentInventoryListeners:
+		if request.Severity != "" || request.State != "" || request.Limit != 0 {
+			return RoutePlan{}, newRouteError("invalid_request",
+				fmt.Sprintf("%s accepts match but not severity, state, or limit", request.Intent))
+		}
 	default:
 		if request.Match != "" || request.Severity != "" || request.State != "" || request.Limit != 0 {
 			return RoutePlan{}, newRouteError("invalid_request",
@@ -192,6 +197,44 @@ func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
 			Source: SourceWazuhAPI,
 			Action: "agents.status",
 			Host:   request.Host,
+		}), nil
+
+	case IntentInventoryProcesses, IntentInventoryListeners:
+		if err := requireHostOnly(request); err != nil {
+			return RoutePlan{}, err
+		}
+		if request.Query != "" {
+			return RoutePlan{}, newRouteError("invalid_request", fmt.Sprintf("%s does not accept query", request.Intent))
+		}
+		if request.Since != "" || request.Until != "" {
+			// Wazuh stamps a row when it last changed, not when it was last
+			// checked, so a bound would drop every process that has simply
+			// kept running.
+			return RoutePlan{}, newRouteError("invalid_request", fmt.Sprintf(
+				"%s reports the host's inventory as it stands and takes no since or until; "+
+					"a bound would filter on when a row last changed and hide long-running processes", request.Intent))
+		}
+		if request.Match != "" {
+			if err := validateInventoryMatch(request.Match); err != nil {
+				return RoutePlan{}, newRouteError("invalid_match", err.Error())
+			}
+			// For listeners a number is a port, since that is what a port
+			// question carries; it must be one, or the filter matches nothing.
+			if port, isPort := InventoryMatchPort(request.Match); isPort && request.Intent == IntentInventoryListeners &&
+				(port < 1 || port > 65535) {
+				return RoutePlan{}, newRouteError("invalid_match", fmt.Sprintf(
+					"match %q is read as a port for inventory.listeners and must be 1-65535", request.Match))
+			}
+		}
+		action := "syscollector.processes"
+		if request.Intent == IntentInventoryListeners {
+			action = "syscollector.listeners"
+		}
+		return newPlan(request.Intent, RouteStep{
+			Source: SourceWazuhAPI,
+			Action: action,
+			Host:   request.Host,
+			Match:  request.Match,
 		}), nil
 
 	case IntentMonitoringProblems:
@@ -432,6 +475,10 @@ func (r *Router) candidateRequests(plan RoutePlan) []RouteRequest {
 
 	case IntentAgentStatus:
 		return []RouteRequest{{Intent: plan.Intent, Host: host}}
+
+	case IntentInventoryProcesses, IntentInventoryListeners:
+		// The match is carried verbatim; the replan validates it again.
+		return []RouteRequest{{Intent: plan.Intent, Host: host, Match: plan.Steps[0].Match}}
 
 	case IntentMonitoringProblems, IntentMonitoringHistory:
 		// Selectors are carried verbatim, so they are read back; the replan

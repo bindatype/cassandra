@@ -83,6 +83,45 @@ func validateMatch(match string) error {
 	return nil
 }
 
+// validateInventoryMatch checks a process-name filter for the inventory
+// intents. Wazuh's q syntax reads ',' as OR, ';' as AND and parentheses as
+// grouping, so a filter containing them could widen the query it was meant to
+// narrow. Process names need none of them.
+func validateInventoryMatch(match string) error {
+	if match == "" || len(match) > maxMatchLen {
+		return fmt.Errorf("match must be 1-%d characters of a process name", maxMatchLen)
+	}
+	for _, char := range match {
+		if char < unicode.MaxASCII && (unicode.IsLetter(char) || unicode.IsDigit(char) || strings.ContainsRune("._-+@:/", char)) {
+			continue
+		}
+		return fmt.Errorf("match is a substring of one process name and may contain only letters, " +
+			"digits, and . _ - + @ : /")
+	}
+	return nil
+}
+
+// InventoryMatchPort reports whether an inventory match is all digits, which
+// inventory.listeners reads as a port rather than a process name. Measured:
+// asked which process owns port 8443, the model put "8443" in match, the
+// process-name filter matched nothing, and the answer said no process owned
+// a port cass-mcp was listening on. No real process name is all digits.
+func InventoryMatchPort(match string) (int, bool) {
+	if match == "" {
+		return 0, false
+	}
+	port := 0
+	for _, char := range match {
+		if char < '0' || char > '9' {
+			return 0, false
+		}
+		if port <= 65535 {
+			port = port*10 + int(char-'0')
+		}
+	}
+	return port, true
+}
+
 // validateSeverity checks the severity floor.
 func validateSeverity(severity string) error {
 	if _, ok := SeverityFloor(severity); !ok {

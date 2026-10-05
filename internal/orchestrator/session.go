@@ -108,7 +108,8 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 		"function": map[string]any{
 			"name": toolName,
 			"description": "Retrieve bounded, read-only infrastructure evidence through the Cass policy broker. " +
-				"Covers Wazuh agent inventory and connection state; Zabbix triggers firing now and the Zabbix " +
+				"Covers Wazuh agent inventory and connection state; one host's processes and listening ports as " +
+				"Wazuh last recorded them (hours old, with the owning process); Zabbix triggers firing now and the Zabbix " +
 				"event log for a past window; a policy-approved file read from an authorized Cass endpoint; " +
 				"one read-only SQL SELECT against the pegasusdb HPC accounting database; and open Request " +
 				"Tracker tickets in allowlisted queues, metadata only. " +
@@ -183,9 +184,12 @@ func toolDefinition(intents, liveHosts, liveResources []string) any {
 						"type": "string",
 						"description": "Narrow monitoring evidence to problems whose name contains this text, " +
 							"case-insensitively, as a plain substring rather than a pattern. " +
-							"For monitoring.problems and monitoring.history only. " +
-							"Reach for it whenever the question names a kind of problem: " +
-							"match \"Zabbix agent is not available\" rather than reading a general page and looking for it.",
+							"For monitoring.problems and monitoring.history, and for inventory.processes and " +
+							"inventory.listeners, where it is part of one process name (letters, digits, . _ - + @ : /); " +
+							"for inventory.listeners a number is read as a port instead, so \"what owns port 8443\" is match \"8443\". " +
+							"Reach for it whenever the question names a kind of problem or a process: " +
+							"match \"Zabbix agent is not available\" rather than reading a general page and looking for it, " +
+							"and match \"sshd\" rather than listing every process on the host.",
 					},
 					"severity": map[string]any{
 						"type": "string",

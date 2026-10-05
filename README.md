@@ -329,6 +329,8 @@ a swapped operation, or an extra step all fail verification.
 | `database.query` | PegasusDB, one read-only `SELECT` |
 | `tickets.open` | RT API, open tickets in allowlisted queues |
 | `tickets.for_host` | RT API, open tickets whose subject names the host |
+| `inventory.processes` | Wazuh syscollector, one host's processes as last recorded (hours old; never command lines) |
+| `inventory.listeners` | Wazuh syscollector, one host's listening TCP ports and bound UDP sockets, with the owning process (hours old) |
 
 MindRouter is used before routing to propose the structured intent and
 after evidence collection to synthesize an answer. It is not permitted to

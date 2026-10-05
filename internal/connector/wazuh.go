@@ -39,9 +39,11 @@ const (
 // wazuhActions is the fixed action table. Route plans may only name an action
 // listed here, so no client or model can reach an arbitrary API path.
 var wazuhActions = map[string]struct{}{
-	"agents.list":   {},
-	"agents.status": {},
-	"groups.list":   {},
+	"agents.list":            {},
+	"agents.status":          {},
+	"groups.list":            {},
+	"syscollector.processes": {},
+	"syscollector.listeners": {},
 }
 
 // WazuhConfig carries operator-supplied execution details. None are derived
@@ -150,6 +152,9 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 
 	if step.Action == "groups.list" {
 		return c.executeGroups(ctx, step)
+	}
+	if step.Action == "syscollector.processes" || step.Action == "syscollector.listeners" {
+		return c.executeInventory(ctx, step)
 	}
 
 	query := url.Values{}
