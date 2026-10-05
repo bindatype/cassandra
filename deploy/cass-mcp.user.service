@@ -1,0 +1,27 @@
+[Unit]
+Description=Cassandra MCP service (cass-mcp) on :8443
+Documentation=https://github.com/bindatype/cassandra/blob/main/deploy/README.md
+After=network-online.target
+
+# Installed by `make install-cass-mcp`, which replaces this file on every run:
+# change it here, not in ~/.config/systemd/user. Everything it runs comes from
+# ~/.local/share/cass-mcp/bin, which the same target fills with the binaries
+# and a snapshot of the broker policy, so a `git pull` in the checkout changes
+# nothing until the next install.
+
+[Service]
+Type=simple
+# Host-specific flags live outside the unit, as CASS_MCP_EXTRA_FLAGS=... in
+# this optional file; for Wazuh questions, "-wazuh-insecure" (as askcass does
+# for Wazuh's localhost-only certificate). Then: systemctl --user restart cass-mcp
+EnvironmentFile=-%h/.config/cass/cass-mcp.flags
+# The env file is shell syntax (export lines), so it is sourced, not read as an EnvironmentFile.
+ExecStart=/bin/bash -c 'set -a; . %h/.config/cass/env; set +a; exec %h/.local/share/cass-mcp/bin/cass-mcp \
+  -cert %h/.local/share/cass-mcp/tls/cert.pem -key %h/.local/share/cass-mcp/tls/key.pem \
+  -chat %h/.local/share/cass-mcp/bin/cass-chat -policy %h/.local/share/cass-mcp/bin/broker-policy.json \
+  $CASS_MCP_EXTRA_FLAGS'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

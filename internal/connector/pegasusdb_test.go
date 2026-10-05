@@ -1,9 +1,17 @@
 package connector
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/bindatype/cassandra/internal/broker"
 )
 
 // TestDialectHintFiresOnlyOnTheMistakeItExplains pins a hint that is worse than
@@ -91,4 +99,140 @@ func TestPegasusRejectsAStatementTimeoutPastTheConnection(t *testing.T) {
 	if !strings.Contains(err.Error(), "never fire first") {
 		t.Errorf("error does not explain the consequence: %v", err)
 	}
+}
+
+// TestPegasusCountsOnlyWhenTheResultWasCut pins the end of a second execution
+// on every query. A result read to the end already knows its total; only one
+// stopped at the row or byte bound needs COUNT(*) to say how much it left out.
+func TestPegasusCountsOnlyWhenTheResultWasCut(t *testing.T) {
+	const query = "SELECT netid FROM jobs2VIEW"
+
+	cases := []struct {
+		name          string
+		rows          int
+		limit         int
+		wantCount     bool
+		wantTotal     int
+		wantTruncated bool
+	}{
+		{"complete result", 3, 0, false, 3, false},
+		{"empty result", 0, 0, false, 0, false},
+		{"cut at the row limit", 5, 2, true, 5, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeAccountingDB{rows: tc.rows}
+			connector := &PegasusConnector{
+				db:               sql.OpenDB(fake),
+				maxRows:          pegasusDefaultMaxRows,
+				maxBytes:         pegasusMaxTotalBytes,
+				statementTimeout: time.Second,
+			}
+			defer connector.Close()
+
+			evidence, err := connector.Execute(context.Background(), broker.RouteStep{
+				Source: broker.SourcePegasusDB,
+				Action: "query.execute",
+				Query:  query,
+				Limit:  tc.limit,
+			})
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+
+			if counted := fake.ranCount(); counted != tc.wantCount {
+				t.Errorf("COUNT(*) ran = %v, want %v; statements: %q", counted, tc.wantCount, fake.statements())
+			}
+			if evidence.TotalAvailable != tc.wantTotal || evidence.Summary["total_matching"] != tc.wantTotal {
+				t.Errorf("total = %d (summary %d), want %d",
+					evidence.TotalAvailable, evidence.Summary["total_matching"], tc.wantTotal)
+			}
+			if evidence.Truncated != tc.wantTruncated {
+				t.Errorf("Truncated = %v, want %v", evidence.Truncated, tc.wantTruncated)
+			}
+		})
+	}
+}
+
+// fakeAccountingDB is a database/sql connector that serves a fixed number of
+// one-column rows, answers the COUNT(*) wrapper with that number, and records
+// every statement it is sent.
+type fakeAccountingDB struct {
+	rows int
+
+	mu   sync.Mutex
+	sent []string
+}
+
+func (f *fakeAccountingDB) Connect(context.Context) (driver.Conn, error) { return fakeConn{f}, nil }
+func (f *fakeAccountingDB) Driver() driver.Driver                        { return nil }
+
+func (f *fakeAccountingDB) record(query string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, query)
+}
+
+func (f *fakeAccountingDB) statements() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sent...)
+}
+
+func (f *fakeAccountingDB) ranCount() bool {
+	for _, query := range f.statements() {
+		if strings.HasPrefix(query, "SELECT COUNT(*) FROM (") {
+			return true
+		}
+	}
+	return false
+}
+
+type fakeConn struct{ db *fakeAccountingDB }
+
+func (c fakeConn) Prepare(query string) (driver.Stmt, error) { return fakeStmt{c.db, query}, nil }
+func (c fakeConn) Close() error                              { return nil }
+func (c fakeConn) Begin() (driver.Tx, error)                 { return nil, fmt.Errorf("no transactions") }
+
+type fakeStmt struct {
+	db    *fakeAccountingDB
+	query string
+}
+
+func (s fakeStmt) Close() error  { return nil }
+func (s fakeStmt) NumInput() int { return -1 }
+
+func (s fakeStmt) Exec([]driver.Value) (driver.Result, error) {
+	s.db.record(s.query)
+	return driver.ResultNoRows, nil
+}
+
+func (s fakeStmt) Query([]driver.Value) (driver.Rows, error) {
+	s.db.record(s.query)
+	if strings.HasPrefix(s.query, "SELECT COUNT(*) FROM (") {
+		return &fakeRows{column: "COUNT(*)", values: []string{fmt.Sprint(s.db.rows)}}, nil
+	}
+	values := make([]string, s.db.rows)
+	for i := range values {
+		values[i] = fmt.Sprintf("user%d", i)
+	}
+	return &fakeRows{column: "netid", values: values}, nil
+}
+
+type fakeRows struct {
+	column string
+	values []string
+	next   int
+}
+
+func (r *fakeRows) Columns() []string { return []string{r.column} }
+func (r *fakeRows) Close() error      { return nil }
+
+func (r *fakeRows) Next(dest []driver.Value) error {
+	if r.next >= len(r.values) {
+		return io.EOF
+	}
+	dest[0] = []byte(r.values[r.next])
+	r.next++
+	return nil
 }

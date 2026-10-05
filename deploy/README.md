@@ -149,3 +149,43 @@ produces a refusal naming both hosts, not an answer.
 
 At a third host, replace this unit with a template plus a per-host environment
 file rather than copying it again.
+
+## The MCP service (cass-mcp)
+
+`cass-mcp` serves Cassandra to MCP clients (Hermes, Claude Code) on `:8443`;
+[docs/connecting-hermes-to-cassandra.md](../docs/connecting-hermes-to-cassandra.md)
+is the client side. It runs on sgtstubby as a user unit, from its own copy of
+the binaries, so an `askcass` rebuild never swaps `cass-chat` mid-question.
+
+Deploy from the checkout on that host, as the user who owns the service:
+
+```sh
+cd ~/dev/cassandra && git pull
+make install-cass-mcp      # test, build, swap in, restart, check
+make rollback-cass-mcp     # put the previous build back; run again to undo
+```
+
+The install stops before changing anything if a test or the build fails.
+After the restart it checks that an unauthenticated request gets `401`, which
+proves TLS is served and the key gate is shut; if not, it puts the previous
+build back and exits non-zero. It does not ask a question, so ask one after a
+deploy that changed how questions are answered.
+
+| What | Where | Managed by the install |
+| --- | --- | --- |
+| Binaries, policy snapshot, `BUILD` | `~/.local/share/cass-mcp/bin/`, each with a `.prev` | Yes |
+| Unit | `~/.config/systemd/user/cass-mcp.service`, from `deploy/cass-mcp.user.service` | Yes; edit the repo copy |
+| Host flags (`CASS_MCP_EXTRA_FLAGS`, e.g. `-wazuh-insecure`) | `~/.config/cass/cass-mcp.flags` | No |
+| TLS | `~/.local/share/cass-mcp/tls/` (`ca.pem`, `cert.pem`, `key.pem`) | No; it warns 30 days before `cert.pem` expires |
+| Source credentials | `~/.config/cass/env` | No |
+| Allowlist | `~/.config/cass/mcp-allowlist` | No |
+
+`cat ~/.local/share/cass-mcp/bin/BUILD` says which commit is running, and
+whether the checkout had uncommitted changes when it was built.
+
+**The policy is a snapshot.** `cass-chat` reads its policy on every question,
+and the unit used to point into the checkout, so every `git pull` changed the
+live policy with no deploy and no record. The install copies
+`configs/broker-policy.example.json` (or `CASS_MCP_POLICY`) beside the
+binaries, so a policy change goes live only through an install, and a rollback
+takes it back too.
