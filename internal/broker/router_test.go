@@ -825,3 +825,80 @@ func TestVerifyRefusesAPlanWithEditedQueuesOrStatus(t *testing.T) {
 		t.Error("Verify() accepted a plan with a status the router never produces")
 	}
 }
+
+// disabled_intents is the backout switch for an intent. A switched-off intent
+// must be refused when planned and again when a plan for it is executed, since
+// a plan is a document that may predate the switch.
+func TestADisabledIntentIsRefusedAtPlanAndVerify(t *testing.T) {
+	before := newTestRouter(t)
+	plan, err := before.Plan(RouteRequest{Intent: IntentFleetInventory})
+	if err != nil {
+		t.Fatalf("Plan() before the switch: %v", err)
+	}
+
+	after, err := NewRouter(Policy{
+		Version:         1,
+		LiveHosts:       map[string]HostPolicy{},
+		Resources:       map[string]Resource{},
+		DisabledIntents: []Intent{IntentFleetInventory},
+	})
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	if after.Enabled(IntentFleetInventory) {
+		t.Error("Enabled() reports a disabled intent as on")
+	}
+
+	_, err = after.Plan(RouteRequest{Intent: IntentFleetInventory})
+	if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "intent_disabled" {
+		t.Errorf("Plan() error = %v, want intent_disabled", err)
+	}
+	err = after.Verify(plan)
+	if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "intent_disabled" {
+		t.Errorf("Verify() of a plan made before the switch = %v, want intent_disabled", err)
+	}
+
+	// Only the named intent goes; its neighbours on the same source stay.
+	if _, err := after.Plan(RouteRequest{Intent: IntentFleetGroups}); err != nil {
+		t.Errorf("Plan() of an intent left on: %v", err)
+	}
+}
+
+func TestNoDisabledIntentsMeansEveryIntentIsOn(t *testing.T) {
+	router := newTestRouter(t)
+	for _, intent := range AllIntents() {
+		if !router.Enabled(intent) {
+			t.Errorf("%s is off with no disabled_intents in the policy", intent)
+		}
+	}
+}
+
+// A misspelled name that loaded would leave on the intent it was meant to
+// switch off, and look as if it had worked.
+func TestDisabledIntentsMustNameRealIntentsOnce(t *testing.T) {
+	for name, disabled := range map[string][]Intent{
+		"misspelled": {"fleet.inventroy"},
+		"repeated":   {IntentTicketsOpen, IntentTicketsOpen},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewRouter(Policy{
+				Version:         1,
+				LiveHosts:       map[string]HostPolicy{},
+				Resources:       map[string]Resource{},
+				DisabledIntents: disabled,
+			})
+			if err == nil {
+				t.Fatalf("a policy disabling %q loaded", disabled)
+			}
+		})
+	}
+
+	policy, err := LoadPolicy(strings.NewReader(
+		`{"version": 1, "live_hosts": {}, "resources": {}, "disabled_intents": ["tickets.open"]}`))
+	if err != nil {
+		t.Fatalf("LoadPolicy() with disabled_intents: %v", err)
+	}
+	if len(policy.DisabledIntents) != 1 || policy.DisabledIntents[0] != IntentTicketsOpen {
+		t.Errorf("DisabledIntents = %v, want [tickets.open]", policy.DisabledIntents)
+	}
+}

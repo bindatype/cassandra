@@ -159,6 +159,10 @@ type Policy struct {
 	Version   int                   `json:"version"`
 	LiveHosts map[string]HostPolicy `json:"live_hosts"`
 	Resources map[string]Resource   `json:"resources"`
+	// DisabledIntents switches named intents off: the model is not offered
+	// them and the router refuses them. It is how an intent is backed out
+	// without reverting code. Absent means every intent is on.
+	DisabledIntents []Intent `json:"disabled_intents,omitempty"`
 }
 
 type HostPolicy struct {

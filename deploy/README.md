@@ -189,3 +189,8 @@ live policy with no deploy and no record. The install copies
 `configs/broker-policy.example.json` (or `CASS_MCP_POLICY`) beside the
 binaries, so a policy change goes live only through an install, and a rollback
 takes it back too.
+
+**Switching an intent off** is a policy change: add it to `disabled_intents`
+in `configs/broker-policy.example.json`, commit, pull here, and
+`make install-cass-mcp`. The model stops being offered it and the broker
+refuses it. Removing it from the list and installing again turns it back on.

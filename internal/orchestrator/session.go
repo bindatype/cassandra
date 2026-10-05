@@ -281,7 +281,7 @@ func NewSession(client *MindRouterClient, router *broker.Router, executor *conne
 	}
 	var intents []string
 	for _, intent := range broker.AllIntents() {
-		if source, ok := broker.SourceForIntent(intent); ok && available[source] {
+		if source, ok := broker.SourceForIntent(intent); ok && available[source] && router.Enabled(intent) {
 			intents = append(intents, string(intent))
 		}
 	}
@@ -816,6 +816,17 @@ func (s *Session) intentIsOffered(intent broker.Intent) error {
 		if offered == string(intent) {
 			return nil
 		}
+	}
+	// Switched off on purpose is a different answer from never configured: the
+	// fix is a policy change, not a credential.
+	if s.router != nil && !s.router.Enabled(intent) {
+		if len(s.intents) == 0 {
+			return fmt.Errorf("intent %q is switched off in this deployment's broker policy "+
+				"(disabled_intents) and cannot be served, and no other intent is available", intent)
+		}
+		return fmt.Errorf("intent %q is switched off in this deployment's broker policy "+
+			"(disabled_intents) and cannot be served. Available: %s",
+			intent, strings.Join(s.intents, ", "))
 	}
 	if len(s.intents) == 0 {
 		return fmt.Errorf("this deployment has no evidence sources configured, so no intent can be "+

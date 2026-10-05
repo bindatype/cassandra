@@ -20,6 +20,7 @@ const (
 type Router struct {
 	liveHosts map[string]map[string]struct{}
 	resources map[string]Resource
+	disabled  map[Intent]struct{}
 }
 
 func NewRouter(policy Policy) (*Router, error) {
@@ -30,6 +31,10 @@ func NewRouter(policy Policy) (*Router, error) {
 	router := &Router{
 		liveHosts: make(map[string]map[string]struct{}, len(policy.LiveHosts)),
 		resources: make(map[string]Resource, len(policy.Resources)),
+		disabled:  make(map[Intent]struct{}, len(policy.DisabledIntents)),
+	}
+	for _, intent := range policy.DisabledIntents {
+		router.disabled[intent] = struct{}{}
 	}
 	for name, resource := range policy.Resources {
 		router.resources[name] = cloneResource(resource)
@@ -44,7 +49,24 @@ func NewRouter(policy Policy) (*Router, error) {
 	return router, nil
 }
 
+// Enabled reports whether the policy leaves an intent switched on.
+func (r *Router) Enabled(intent Intent) bool {
+	_, off := r.disabled[intent]
+	return !off
+}
+
+func disabledError(intent Intent) *RouteError {
+	return newRouteError("intent_disabled",
+		fmt.Sprintf("%s is switched off in this deployment's broker policy (disabled_intents)", intent))
+}
+
 func (r *Router) Plan(request RouteRequest) (RoutePlan, error) {
+	// First, so nothing about a switched-off intent is planned. Verify plans
+	// again, so a plan made before the switch was set is refused too.
+	if !r.Enabled(request.Intent) {
+		return RoutePlan{}, disabledError(request.Intent)
+	}
+
 	// Normalized once here, so every source gets the same instant and a
 	// malformed bound is refused at planning time.
 	since, err := ParseSince(request.Since, time.Now())
@@ -376,6 +398,10 @@ func cloneResource(resource Resource) Resource {
 func (r *Router) Verify(plan RoutePlan) error {
 	if len(plan.Steps) == 0 {
 		return newRouteError("invalid_plan", "plan contains no steps")
+	}
+	// Re-planning would refuse it anyway, as unauthorized; say why instead.
+	if !r.Enabled(plan.Intent) {
+		return disabledError(plan.Intent)
 	}
 	candidates := r.candidateRequests(plan)
 	if len(candidates) == 0 {

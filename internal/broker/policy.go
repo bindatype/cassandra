@@ -70,6 +70,19 @@ func validatePolicy(policy Policy) error {
 		}
 	}
 
+	// A misspelled name must not load: it would leave on the intent it was
+	// meant to switch off, and say nothing.
+	disabled := make(map[Intent]bool, len(policy.DisabledIntents))
+	for _, intent := range policy.DisabledIntents {
+		if _, ok := SourceForIntent(intent); !ok {
+			return fmt.Errorf("disabled_intents names %q, which is not an intent", intent)
+		}
+		if disabled[intent] {
+			return fmt.Errorf("disabled_intents lists %q twice", intent)
+		}
+		disabled[intent] = true
+	}
+
 	for host, hostPolicy := range policy.LiveHosts {
 		if err := validateHostSelector(host); err != nil {
 			return fmt.Errorf("live host %q: %w", host, err)

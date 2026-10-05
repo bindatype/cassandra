@@ -342,6 +342,17 @@ fixed operations, canonical paths, and limits. The current broker kernel
 permits only bounded `filesystem.list`, `filesystem.stat`,
 `filesystem.read`, and `filesystem.tail` routes.
 
+`disabled_intents` switches named intents off without reverting code: the
+model is not offered them, the router refuses them when planning, and the
+executor refuses a plan for one made before the switch was set, all with
+`intent_disabled`. A name that is not an intent, or one listed twice, stops
+the policy loading, so a typo cannot leave on what it meant to turn off.
+Absent, every intent whose source is configured is on.
+
+```json
+{ "version": 1, "disabled_intents": ["fleet.groups"], "live_hosts": {}, "resources": {} }
+```
+
 Generate a route plan against the safe harness example:
 
 ```bash
