@@ -825,3 +825,157 @@ func TestVerifyRefusesAPlanWithEditedQueuesOrStatus(t *testing.T) {
 		t.Error("Verify() accepted a plan with a status the router never produces")
 	}
 }
+
+// disabled_intents is the backout switch for an intent. A switched-off intent
+// must be refused when planned and again when a plan for it is executed, since
+// a plan is a document that may predate the switch.
+func TestADisabledIntentIsRefusedAtPlanAndVerify(t *testing.T) {
+	before := newTestRouter(t)
+	plan, err := before.Plan(RouteRequest{Intent: IntentFleetInventory})
+	if err != nil {
+		t.Fatalf("Plan() before the switch: %v", err)
+	}
+
+	after, err := NewRouter(Policy{
+		Version:         1,
+		LiveHosts:       map[string]HostPolicy{},
+		Resources:       map[string]Resource{},
+		DisabledIntents: []Intent{IntentFleetInventory},
+	})
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	if after.Enabled(IntentFleetInventory) {
+		t.Error("Enabled() reports a disabled intent as on")
+	}
+
+	_, err = after.Plan(RouteRequest{Intent: IntentFleetInventory})
+	if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "intent_disabled" {
+		t.Errorf("Plan() error = %v, want intent_disabled", err)
+	}
+	err = after.Verify(plan)
+	if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "intent_disabled" {
+		t.Errorf("Verify() of a plan made before the switch = %v, want intent_disabled", err)
+	}
+
+	// Only the named intent goes; its neighbours on the same source stay.
+	if _, err := after.Plan(RouteRequest{Intent: IntentFleetGroups}); err != nil {
+		t.Errorf("Plan() of an intent left on: %v", err)
+	}
+}
+
+func TestNoDisabledIntentsMeansEveryIntentIsOn(t *testing.T) {
+	router := newTestRouter(t)
+	for _, intent := range AllIntents() {
+		if !router.Enabled(intent) {
+			t.Errorf("%s is off with no disabled_intents in the policy", intent)
+		}
+	}
+}
+
+// A misspelled name that loaded would leave on the intent it was meant to
+// switch off, and look as if it had worked.
+func TestDisabledIntentsMustNameRealIntentsOnce(t *testing.T) {
+	for name, disabled := range map[string][]Intent{
+		"misspelled": {"fleet.inventroy"},
+		"repeated":   {IntentTicketsOpen, IntentTicketsOpen},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewRouter(Policy{
+				Version:         1,
+				LiveHosts:       map[string]HostPolicy{},
+				Resources:       map[string]Resource{},
+				DisabledIntents: disabled,
+			})
+			if err == nil {
+				t.Fatalf("a policy disabling %q loaded", disabled)
+			}
+		})
+	}
+
+	policy, err := LoadPolicy(strings.NewReader(
+		`{"version": 1, "live_hosts": {}, "resources": {}, "disabled_intents": ["tickets.open"]}`))
+	if err != nil {
+		t.Fatalf("LoadPolicy() with disabled_intents: %v", err)
+	}
+	if len(policy.DisabledIntents) != 1 || policy.DisabledIntents[0] != IntentTicketsOpen {
+		t.Errorf("DisabledIntents = %v, want [tickets.open]", policy.DisabledIntents)
+	}
+}
+
+func TestInventoryIntentsPlanOneHostAndSurviveVerify(t *testing.T) {
+	router := newTestRouter(t)
+	for intent, action := range map[Intent]string{
+		IntentInventoryProcesses: "syscollector.processes",
+		IntentInventoryListeners: "syscollector.listeners",
+	} {
+		for _, match := range []string{"", "sshd", "zabbix_agent2", "java@1.8:x/y+z"} {
+			plan, err := router.Plan(RouteRequest{Intent: intent, Host: "node01.example.edu", Match: match})
+			if err != nil {
+				t.Fatalf("Plan(%s, match %q) error = %v", intent, match, err)
+			}
+			step := plan.Steps[0]
+			if len(plan.Steps) != 1 || step.Source != SourceWazuhAPI || step.Action != action ||
+				step.Host != "node01.example.edu" || step.Match != match {
+				t.Errorf("Plan(%s, match %q) = %+v", intent, match, plan)
+			}
+			if err := router.Verify(plan); err != nil {
+				t.Errorf("Verify() rejected an inventory plan the router produced: %v", err)
+			}
+		}
+	}
+}
+
+// Each refused field would otherwise be silently ignored or would change what
+// the query means: a time bound filters on when a row last changed, which
+// hides every long-running process.
+func TestInventoryIntentsRefuseWhatTheyCannotHonour(t *testing.T) {
+	router := newTestRouter(t)
+	for name, request := range map[string]RouteRequest{
+		"no host":  {Intent: IntentInventoryProcesses},
+		"since":    {Intent: IntentInventoryProcesses, Host: "node01.example.edu", Since: "2h"},
+		"until":    {Intent: IntentInventoryListeners, Host: "node01.example.edu", Until: "1d"},
+		"limit":    {Intent: IntentInventoryProcesses, Host: "node01.example.edu", Limit: 10},
+		"severity": {Intent: IntentInventoryListeners, Host: "node01.example.edu", Severity: "high"},
+		"query":    {Intent: IntentInventoryProcesses, Host: "node01.example.edu", Query: "SELECT 1"},
+		"resource": {Intent: IntentInventoryListeners, Host: "node01.example.edu", Resource: "system-messages"},
+	} {
+		if _, err := router.Plan(request); err == nil {
+			t.Errorf("%s: Plan(%+v) was accepted", name, request)
+		}
+	}
+}
+
+// Wazuh's q syntax reads ',' as OR and ';' as AND: a match carrying them could
+// widen the query it is meant to narrow.
+func TestInventoryMatchCannotWidenTheWazuhQuery(t *testing.T) {
+	router := newTestRouter(t)
+	for _, match := range []string{"ssh,euser=root", "ssh;euser=root", "(ssh)", "ssh d", "ssh=1", "ssh~", "ssh*", "ssh\tx"} {
+		_, err := router.Plan(RouteRequest{Intent: IntentInventoryProcesses, Host: "node01.example.edu", Match: match})
+		if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "invalid_match" {
+			t.Errorf("match %q: error = %v, want invalid_match", match, err)
+		}
+	}
+}
+
+// Measured: asked which process owns port 8443, the model put "8443" in
+// match; as a process-name filter it matched nothing and the answer denied a
+// listener that existed. For listeners a number is a port, and must be one.
+func TestAListenersMatchThatIsANumberIsAPort(t *testing.T) {
+	router := newTestRouter(t)
+	for match, valid := range map[string]bool{"8443": true, "22": true, "65535": true, "0": false, "65536": false, "123456": false} {
+		_, err := router.Plan(RouteRequest{Intent: IntentInventoryListeners, Host: "node01.example.edu", Match: match})
+		if valid && err != nil {
+			t.Errorf("port %q refused: %v", match, err)
+		}
+		if !valid {
+			if routeErr, ok := err.(*RouteError); !ok || routeErr.Code != "invalid_match" {
+				t.Errorf("port %q: error = %v, want invalid_match", match, err)
+			}
+		}
+	}
+	// A number means nothing special for processes; it is a name filter there.
+	if _, err := router.Plan(RouteRequest{Intent: IntentInventoryProcesses, Host: "node01.example.edu", Match: "0"}); err != nil {
+		t.Errorf("a numeric process-name match was refused: %v", err)
+	}
+}

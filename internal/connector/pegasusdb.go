@@ -169,10 +169,14 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 
 	// The full row count, so a truncated result can be told from a complete
 	// one. The rows can't show it: a grouped aggregate missing half its groups
-	// still looks well formed.
-	total, err := c.countRows(ctx, conn, step.Query)
-	if err != nil {
-		return Evidence{}, err
+	// still looks well formed. A result that stopped at neither bound was read
+	// to the end, so its total is the rows returned and needs no second run.
+	total := len(items)
+	if capped {
+		total, err = c.countRows(ctx, conn, step.Query)
+		if err != nil {
+			return Evidence{}, err
+		}
 	}
 
 	summary := map[string]int{
@@ -201,8 +205,8 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 }
 
 // countRows reports how many rows the query yields by wrapping it in
-// COUNT(*). It costs a second execution; the Zabbix connector makes the same
-// trade.
+// COUNT(*). It costs a second execution, so Execute calls it only when the
+// result was cut short; the Zabbix connector makes the same trade.
 func (c *PegasusConnector) countRows(ctx context.Context, conn *sql.Conn, query string) (int, error) {
 	wrapped := "SELECT COUNT(*) FROM (" + strings.TrimRight(strings.TrimSpace(query), "; \t\n\r") + ") AS cass_rowcount"
 

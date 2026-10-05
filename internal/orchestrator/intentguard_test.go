@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/bindatype/cassandra/internal/broker"
+	"github.com/bindatype/cassandra/internal/connector"
 )
 
 // NewSession lists only intents this session can reach, but a list is not a
@@ -157,5 +158,49 @@ func TestDocumentationNeverDisplacesEvidence(t *testing.T) {
 		if entry.Stage == "answered_from_documentation" {
 			t.Error("the documentation path ran even though evidence was collected")
 		}
+	}
+}
+
+// An intent switched off in the policy is neither offered nor served, and the
+// refusal says it was switched off. "Its source is not configured" would send
+// the reader after a credential when the fix is a policy change.
+func TestADisabledIntentIsWithheldAndRefusedAsSwitchedOff(t *testing.T) {
+	policy, err := broker.LoadPolicy(strings.NewReader(`{
+		"version": 1, "live_hosts": {}, "resources": {},
+		"disabled_intents": ["fleet.groups"]
+	}`))
+	if err != nil {
+		t.Fatalf("LoadPolicy() error = %v", err)
+	}
+	router, err := broker.NewRouter(policy)
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	executor, err := connector.NewExecutor(&fakeConnector{source: broker.SourceWazuhAPI})
+	if err != nil {
+		t.Fatalf("NewExecutor() error = %v", err)
+	}
+	session := NewSession(nil, router, executor)
+
+	offered := strings.Join(session.Intents(), ",")
+	if strings.Contains(offered, string(broker.IntentFleetGroups)) {
+		t.Errorf("intents = %q, offers the disabled fleet.groups", offered)
+	}
+	if !strings.Contains(offered, string(broker.IntentFleetInventory)) {
+		t.Errorf("intents = %q, lost fleet.inventory, which was left on", offered)
+	}
+
+	err = session.intentIsOffered(broker.IntentFleetGroups)
+	if err == nil {
+		t.Fatal("a disabled intent was accepted")
+	}
+	if !strings.Contains(err.Error(), "switched off") || !strings.Contains(err.Error(), "disabled_intents") {
+		t.Errorf("refusal does not say the intent was switched off in the policy: %v", err)
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Errorf("refusal blames configuration for a deliberate switch: %v", err)
+	}
+	if !strings.Contains(err.Error(), string(broker.IntentFleetInventory)) {
+		t.Errorf("refusal does not list what is available: %v", err)
 	}
 }

@@ -33,7 +33,7 @@ func TestPromptDescribesEveryIntent(t *testing.T) {
 // is to be precise about what the model may ask for.
 func TestPromptCountsItsOwnChannels(t *testing.T) {
 	spelled := map[int]string{
-		4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
+		4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
 	}
 	want, ok := spelled[len(broker.AllIntents())]
 	if !ok {

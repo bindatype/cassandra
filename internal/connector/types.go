@@ -55,6 +55,10 @@ type Evidence struct {
 	// the result. A missing key reads as zero; a count never computed is not
 	// zero. A warning is a defect in the answer, not a footnote to it.
 	Warnings []string `json:"warnings,omitempty"`
+	// Notes name limits a reader would not see in the rows themselves, such
+	// as how old an inventory is. Unlike a warning, a note is not a defect;
+	// it is repeated when it bears on the question.
+	Notes []string `json:"notes,omitempty"`
 	// Breakdown holds named count tables computed in code over every matching
 	// row, not just the returned page. A large result is answered by
 	// aggregating it, not by returning more rows, which would overrun the

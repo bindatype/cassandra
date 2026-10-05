@@ -2,7 +2,7 @@ GO ?= go
 DIST ?= dist
 BINARY ?= cassd
 
-.PHONY: help install uninstall test verify check-entrypoints test-rt-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
+.PHONY: help install uninstall install-cass-mcp rollback-cass-mcp test verify check-entrypoints test-rt-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
 
 # Default target: say what exists. A bare `make` that silently builds one
 # thing tells a newcomer nothing about the other fifteen.
@@ -15,6 +15,10 @@ help:
 	@echo '  make test-rt-live      RT invariants against live data (needs RT credentials)'
 	@echo '  make eval-rt-shape     does the model bound a ticket-age question (needs credentials)'
 	@echo '  make fmt               gofmt the tree'
+	@echo ''
+	@echo 'On the host that serves cass-mcp (sgtstubby):'
+	@echo '  make install-cass-mcp   test, build, swap in, restart and check cass-mcp'
+	@echo '  make rollback-cass-mcp  put the previous cass-mcp build back'
 	@echo ''
 	@echo 'These need:  source ~/.config/cass/env'
 	@echo '  make probe             ask the Zabbix trap questions and judge them by eye'
@@ -54,6 +58,15 @@ install:
 uninstall:
 	@rm -f $(PREFIX)/askcass
 	@echo 'removed $(PREFIX)/askcass'
+
+# Deploys this checkout to the cass-mcp user service, keeping the previous
+# build for `make rollback-cass-mcp`. The script says what it touches and what
+# it never does; deploy/README.md has the layout.
+install-cass-mcp:
+	@bash ./scripts/install_cass_mcp.sh
+
+rollback-cass-mcp:
+	@bash ./scripts/install_cass_mcp.sh -r
 
 test:
 	$(GO) test ./...

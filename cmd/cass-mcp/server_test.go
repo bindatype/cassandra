@@ -179,3 +179,16 @@ func TestIdleSessionsAreForgottenWhenANewOneStarts(t *testing.T) {
 		t.Errorf("%d sessions remembered, want 2 (the live one and the new one)", len(s.sessions))
 	}
 }
+
+// The description is all an MCP client has to decide whether a question is
+// Cassandra's. When the inventory intents shipped it still said only "Wazuh
+// agent inventory", so a client asked which process owns a port had no reason
+// to call cass_ask at all.
+func TestTheToolDescriptionNamesHostProcessesAndPorts(t *testing.T) {
+	description, _ := askTool()["description"].(string)
+	for _, want := range []string{"processes", "listening ports"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("cass_ask description does not mention %q: %s", want, description)
+		}
+	}
+}

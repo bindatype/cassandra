@@ -329,6 +329,8 @@ a swapped operation, or an extra step all fail verification.
 | `database.query` | PegasusDB, one read-only `SELECT` |
 | `tickets.open` | RT API, open tickets in allowlisted queues |
 | `tickets.for_host` | RT API, open tickets whose subject names the host |
+| `inventory.processes` | Wazuh syscollector, one host's processes as last recorded (hours old; never command lines) |
+| `inventory.listeners` | Wazuh syscollector, one host's listening TCP ports and bound UDP sockets, with the owning process (hours old) |
 
 MindRouter is used before routing to propose the structured intent and
 after evidence collection to synthesize an answer. It is not permitted to
@@ -341,6 +343,17 @@ Wazuh remains the intended inventory source. Resource aliases map to
 fixed operations, canonical paths, and limits. The current broker kernel
 permits only bounded `filesystem.list`, `filesystem.stat`,
 `filesystem.read`, and `filesystem.tail` routes.
+
+`disabled_intents` switches named intents off without reverting code: the
+model is not offered them, the router refuses them when planning, and the
+executor refuses a plan for one made before the switch was set, all with
+`intent_disabled`. A name that is not an intent, or one listed twice, stops
+the policy loading, so a typo cannot leave on what it meant to turn off.
+Absent, every intent whose source is configured is on.
+
+```json
+{ "version": 1, "disabled_intents": ["fleet.groups"], "live_hosts": {}, "resources": {} }
+```
 
 Generate a route plan against the safe harness example:
 

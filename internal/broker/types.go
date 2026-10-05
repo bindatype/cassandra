@@ -12,6 +12,10 @@ const (
 	IntentMonitoringHistory  Intent = "monitoring.history"
 	IntentTicketsOpen        Intent = "tickets.open"
 	IntentTicketsByHost      Intent = "tickets.for_host"
+	// The inventory intents read Wazuh syscollector: what one host reported
+	// running and listening, as of its last inventory change, hours old.
+	IntentInventoryProcesses Intent = "inventory.processes"
+	IntentInventoryListeners Intent = "inventory.listeners"
 )
 
 type Source string
@@ -29,7 +33,8 @@ const (
 // so a model is never offered an intent whose connector does not exist.
 func SourceForIntent(intent Intent) (Source, bool) {
 	switch intent {
-	case IntentFleetInventory, IntentFleetGroups, IntentAgentStatus:
+	case IntentFleetInventory, IntentFleetGroups, IntentAgentStatus,
+		IntentInventoryProcesses, IntentInventoryListeners:
 		return SourceWazuhAPI, true
 	case IntentMonitoringProblems:
 		return SourceZabbixAPI, true
@@ -58,6 +63,8 @@ func AllIntents() []Intent {
 		IntentMonitoringHistory,
 		IntentTicketsOpen,
 		IntentTicketsByHost,
+		IntentInventoryProcesses,
+		IntentInventoryListeners,
 	}
 }
 
@@ -159,6 +166,10 @@ type Policy struct {
 	Version   int                   `json:"version"`
 	LiveHosts map[string]HostPolicy `json:"live_hosts"`
 	Resources map[string]Resource   `json:"resources"`
+	// DisabledIntents switches named intents off: the model is not offered
+	// them and the router refuses them. It is how an intent is backed out
+	// without reverting code. Absent means every intent is on.
+	DisabledIntents []Intent `json:"disabled_intents,omitempty"`
 }
 
 type HostPolicy struct {
