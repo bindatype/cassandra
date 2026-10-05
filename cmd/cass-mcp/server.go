@@ -320,7 +320,9 @@ func askTool() map[string]any {
 	return map[string]any{
 		"name": toolName,
 		"description": "Ask Cassandra, GW RTS's read-only infrastructure evidence service, one question in plain " +
-			"English. It covers Zabbix problems and event history, Wazuh agent inventory, Request Tracker tickets " +
+			"English. It covers Zabbix problems and event history, Wazuh agent inventory and connection state, " +
+			"one host's running processes and listening ports with the process that owns each port (from " +
+			"Wazuh's inventory, usually under an hour old), Request Tracker tickets " +
 			"(metadata only, no requester), Slurm job accounting on Pegasus, and policy-approved reads from " +
 			"managed hosts. Returns Cassandra's answer, which names its sources and limits, and the evidence as " +
 			"JSON with figures counted by the source systems; quote figures from the evidence rather than " +
