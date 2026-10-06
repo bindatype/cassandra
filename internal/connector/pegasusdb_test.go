@@ -6,6 +6,9 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -235,4 +238,72 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 	dest[0] = []byte(r.values[r.next])
 	r.next++
 	return nil
+}
+
+func TestAccountingNotesStateTheDefinitionAndTheTime(t *testing.T) {
+	at := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+
+	view := accountingNotes("SELECT workload, COUNT(*) FROM runTBL2_workload WHERE SubmitTime > 0 GROUP BY workload", at)
+	if len(view) != 3 || view[0] != workloadDefinition || view[1] != workloadReporting ||
+		!strings.Contains(view[2], "as of 2026-10-06T12:00:00Z") {
+		t.Errorf("view query notes = %q, want the definition, what to report, and the as-of time", view)
+	}
+	for _, want := range []string{"1778299200", "before and after", "excluded or unclassified"} {
+		if !strings.Contains(workloadReporting, want) {
+			t.Errorf("the reporting note lacks %q", want)
+		}
+	}
+	table := accountingNotes("SELECT COUNT(*) FROM runTBL2 WHERE SubmitTime > 0", at)
+	if len(table) != 1 || !strings.Contains(table[0], "as of") || !strings.Contains(table[0], "can still grow") {
+		t.Errorf("runTBL2 query notes = %q, want the as-of note only", table)
+	}
+	if other := accountingNotes("SELECT COUNT(*) FROM jobs2VIEW WHERE SubmitTime > 0", at); len(other) != 0 {
+		t.Errorf("a query on another table got notes: %q", other)
+	}
+}
+
+// The definition note restates the view. If the view's rules change and the
+// note does not, answers would describe a definition that is no longer applied.
+func TestWorkloadDefinitionMatchesTheView(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "configs", "pegasusdb", "runTBL2_workload.sql"))
+	if err != nil {
+		t.Fatalf("read the view: %v", err)
+	}
+	body := string(raw)
+	body = body[strings.Index(body, "CREATE OR REPLACE"):]
+	names := func(pattern string) []string {
+		m := regexp.MustCompile(pattern).FindStringSubmatch(body)
+		if m == nil {
+			t.Fatalf("the view no longer has a list matching %s", pattern)
+		}
+		return regexp.MustCompile(`'([^']+)'`).FindAllString(m[1], -1)
+	}
+	// Every excluded partition is named in the note.
+	for _, quoted := range names("IN \\(([^)]*)\\) THEN 'excluded'") {
+		if name := strings.Trim(quoted, "'"); !strings.Contains(workloadDefinition, name) {
+			t.Errorf("the view excludes %q but the note does not say so", name)
+		}
+	}
+	// Every pre-cutover GPU partition is named, except the legacy -gpu ones,
+	// which the note covers as a family.
+	for _, quoted := range names("superChip%'\\s+OR r\\.`partition` IN \\(([^)]*)\\) THEN 'gpu'") {
+		name := strings.Trim(quoted, "'")
+		if strings.HasSuffix(name, "-gpu") {
+			if !strings.Contains(workloadDefinition, "legacy -gpu partitions") {
+				t.Errorf("the view counts %q as GPU but the note does not mention the legacy -gpu partitions", name)
+			}
+			continue
+		}
+		if !strings.Contains(workloadDefinition, name) {
+			t.Errorf("the view counts %q as GPU but the note does not say so", name)
+		}
+	}
+	for _, want := range []string{"1778299200", "superChip*", "--gres"} {
+		if !strings.Contains(workloadDefinition, want) {
+			t.Errorf("the definition note lacks %q", want)
+		}
+		if want != "--gres" && !strings.Contains(body, strings.ReplaceAll(want, "*", "%")) {
+			t.Errorf("the view no longer has %q, which the note describes", want)
+		}
+	}
 }

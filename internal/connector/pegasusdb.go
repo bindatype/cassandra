@@ -194,6 +194,7 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 		Action:         step.Action,
 		Endpoint:       c.endpoint,
 		Query:          step.Query,
+		Notes:          accountingNotes(step.Query, requestedAt),
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -202,6 +203,40 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 		Summary:        summary,
 		Items:          items,
 	}, nil
+}
+
+// workloadDefinition states, for the reader, how runTBL2_workload classifies
+// a job. It mirrors configs/pegasusdb/runTBL2_workload.sql, and a test holds
+// the two together.
+const workloadDefinition = "workload comes from the runTBL2_workload view: from 9 May 2026 (epoch 1778299200) " +
+	"a job is gpu if it requested a GPU (--gres), on any partition, and cpu otherwise; before then it is " +
+	"classified by partition, with gpu, viz, ait, any superChip* and the legacy -gpu partitions as gpu; " +
+	"nano, the staff partitions deus, purge, secret and secret-gpu, and unresolved multi-partition requests " +
+	"are excluded; a partition no rule covers is unclassified"
+
+// workloadReporting is what an answer from the view must also give. It was a
+// prompt rule first, and in a live check the model gave neither part; the
+// as-of note beside it, carried in evidence, was quoted in every answer.
+const workloadReporting = "before answering, also give: for a window that spans 9 May 2026, the counts before " +
+	"and after that instant as well as the total (group by SubmitTime >= 1778299200); and how many jobs in the " +
+	"window were excluded or unclassified, naming the unclassified partitions. Run one more query for these if " +
+	"this result does not already show them"
+
+// accountingNotes are what an accounting answer needs and the rows cannot
+// show: which definition produced a workload count, and that a past window's
+// totals are a snapshot. Jobs submitted in a window keep arriving until they
+// finish and are ingested: a count for 9 May-29 Sep grew by four overnight.
+func accountingNotes(query string, requestedAt time.Time) []string {
+	lower := strings.ToLower(query)
+	var notes []string
+	if strings.Contains(lower, "runtbl2_workload") {
+		notes = append(notes, workloadDefinition, workloadReporting)
+	}
+	if strings.Contains(lower, "runtbl2") {
+		notes = append(notes, "as of "+requestedAt.Format(time.RFC3339)+": totals for a past window can still "+
+			"grow until every job submitted in it has finished and been ingested, so quote this time with the figures")
+	}
+	return notes
 }
 
 // countRows reports how many rows the query yields by wrapping it in
