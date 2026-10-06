@@ -393,7 +393,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 	seenError := map[string]bool{}
 	var lastError string
 	for turn := 0; turn < maxToolCalls; turn++ {
-		choice, err := s.client.Complete(ctx, messages, tools, forceTool)
+		choice, err := s.complete(ctx, turn, messages, tools, forceTool)
 		forceTool = ""
 		if err != nil {
 			return "", err
@@ -417,8 +417,11 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			}
 
 			if answer == "" {
-				s.record("empty_answer", "model returned neither a tool call nor content", false)
+				detail := fmt.Sprintf("model returned neither a tool call nor content (turn %d, finish_reason %q)",
+					turn+1, choice.FinishReason)
+				s.record("empty_answer", detail, false)
 				s.event.Status = "failed"
+				s.event.Error = "empty_answer: " + detail
 				return "", fmt.Errorf("model returned neither a tool call nor an answer")
 			}
 			if turn == 0 {
@@ -633,6 +636,14 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
 	}
 
+	if err := partitionPatternFilter(request); err != nil {
+		s.record("partition_pattern_refused", err.Error(), false)
+		if s.event.Decision == "no_tool_call" {
+			s.event.Decision = "denied"
+		}
+		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+
 	plan, err := s.router.Plan(request)
 	if err != nil {
 		s.record("policy_denied", err.Error(), false)
@@ -666,6 +677,35 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
 	}
 	return result, nil
+}
+
+// modelRetryDelay is the pause before retrying a transient model failure.
+var modelRetryDelay = 2 * time.Second
+
+// complete asks the model for the next turn. A transient failure gets one
+// retry; any failure that remains is recorded in the trace and the audit
+// event before it ends the question. Observed 2026-10-06: a call failed on the
+// second turn, Ask returned without recording it, and the audit record said
+// "failed" with no error, so the cause was lost.
+func (s *Session) complete(ctx context.Context, turn int, messages []Message, tools []any, forceTool string) (Choice, error) {
+	choice, err := s.client.Complete(ctx, messages, tools, forceTool)
+	var callErr *ModelCallError
+	if err != nil && errors.As(err, &callErr) && callErr.Transient {
+		s.record("model_call_retried", fmt.Sprintf("turn %d: %v; retrying once", turn+1, err), false)
+		select {
+		case <-time.After(modelRetryDelay):
+			choice, err = s.client.Complete(ctx, messages, tools, forceTool)
+		case <-ctx.Done():
+		}
+	}
+	if err != nil {
+		detail := fmt.Sprintf("turn %d: %v", turn+1, err)
+		s.record("model_call_failed", detail, false)
+		s.event.Status = "failed"
+		s.event.Error = "model_call_failed: " + detail
+		return Choice{}, fmt.Errorf("model call failed on turn %d: %w", turn+1, err)
+	}
+	return choice, nil
 }
 
 // writeAudit records the event, filling in the outcome from the trace. It runs

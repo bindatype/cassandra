@@ -316,6 +316,11 @@ WHERE table_schema='pegasusdb'
 - Never use `DerivedExitCode` to determine whether a job succeeded or failed.
 <!-- rule:partition-reserved -->
 - `Partition` is a reserved word in MariaDB. Always write it as `` `partition` ``.
+<!-- rule:workload-view -->
+- **GPU and CPU jobs, said generically, are a workload class, not a partition.** Query the view `runTBL2_workload`, which is `runTBL2` plus a column `workload`: `'gpu'`, `'cpu'`, `'excluded'` or `'unclassified'`. Count GPU jobs with `WHERE workload = 'gpu'`, never with a partition-name pattern. From 9 May 2026 a GPU job is one that requested a GPU, on any partition, superChip included; the view applies that and the older partition rules for you.
+- **A partition named in the question means that partition only.** "Jobs on the gpu partition" is `` `partition` = 'gpu' ``, which is a different number from GPU jobs.
+- For a window that spans 9 May 2026, report the part before it, the part after it, and the total: group by `SubmitTime >= 1778299200`, the cutover instant.
+- Say how many jobs in the window were `excluded` or `unclassified`, and name the unclassified partitions, so the reader sees what the class left out.
 
 ### Time
 
