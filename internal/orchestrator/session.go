@@ -644,6 +644,14 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
 	}
 
+	if err := memoryUnitFilter(request); err != nil {
+		s.record("memory_units_refused", err.Error(), false)
+		if s.event.Decision == "no_tool_call" {
+			s.event.Decision = "denied"
+		}
+		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+
 	plan, err := s.router.Plan(request)
 	if err != nil {
 		s.record("policy_denied", err.Error(), false)
