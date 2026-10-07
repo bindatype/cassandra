@@ -194,3 +194,35 @@ takes it back too.
 in `configs/broker-policy.example.json`, commit, pull here, and
 `make install-cass-mcp`. The model stops being offered it and the broker
 refuses it. Removing it from the list and installing again turns it back on.
+
+### Exports (`cass_export`)
+
+`cass-mcp` also serves `cass_export` and `cass_export_status`: deterministic
+exports of Pegasus job requests, for studies that need rows rather than an
+answer. No model writes SQL or reads a column; `internal/export` does the
+work, `cass-export` runs the same code from a shell, and every export ships
+`verify_export.py` and `VERIFIER.md`, which says exactly what it checks.
+
+Exports are **off** unless all of these exist; the service log says which is
+missing, and questions are unaffected either way:
+
+| What | Where | Notes |
+| --- | --- | --- |
+| Permissions | `~/.config/cass/export-allowlist` | `person export` or `person export,identify`, using the names in `mcp-allowlist`. Being able to ask questions is not permission to export. `identify` allows raw netids; without it identities are pseudonymous. Removing the file revokes everyone. |
+| Salt | `~/.config/cass/export-salt` | At least 16 bytes, mode 0600. Pseudonymous keys are stable while it is unchanged; replacing it breaks comparison with earlier exports. Create once: `head -c 32 /dev/urandom > ~/.config/cass/export-salt && chmod 600 ~/.config/cass/export-salt` |
+| The view | `runTBL2_jobs` on lucee | From `configs/pegasusdb/runTBL2_jobs.sql`. |
+| Database login | `CASS_PEGASUS_DSN` in `~/.config/cass/env` | The same read-only login as questions. |
+
+Exports are written under `~/.local/share/cass-mcp/exports/<id>/` (0700,
+files 0600), kept 14 days (`-export-retention`), downloaded by their owner
+only at `https://<host>:8443/exports/<id>/<file>` with the same key, and
+audited to `~/.local/share/cass/export-audit.jsonl`. One running export per
+person; at most 2,000,000 rows (`-export-max-rows`) and 30 minutes
+(`-export-timeout`).
+
+Before turning exports on, run the live checks against the view:
+
+```sh
+set -a; . ~/.config/cass/env; set +a
+make test-export-live
+```

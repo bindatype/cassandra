@@ -62,6 +62,18 @@ else
 	bad "go vet -tags rtlive" "$(go vet -tags rtlive ./internal/connector/ 2>&1 | head -3)"
 fi
 
+if go vet -tags integration ./internal/export/ >/dev/null 2>&1; then
+	ok "go vet -tags integration (export live tests still compile)"
+else
+	bad "go vet -tags integration" "$(go vet -tags integration ./internal/export/ 2>&1 | head -3)"
+fi
+leaked=$(go test ./internal/export/ -list '.*' 2>/dev/null | grep -c '^TestLive')
+if [ "$leaked" = "0" ]; then
+	ok "export live tests excluded from the default run"
+else
+	bad "export live tests leak into the default run" "$leaked TestLive test(s) would run without being asked for"
+fi
+
 # The live tests reach the network with real credentials. They must never join
 # the default run, on any machine, including one with an environment sourced.
 leaked=$(go test ./internal/connector/ -list '.*' 2>/dev/null | grep -c RTLive)

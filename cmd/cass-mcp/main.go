@@ -24,8 +24,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/bindatype/cassandra/internal/export"
 )
 
 func main() {
@@ -48,6 +51,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxPerUser := flags.Int("max-per-person", 2, "questions answered at once for one person")
 	timeout := flags.Duration("timeout", 240*time.Second, "longest one question may take")
 	hash := flags.Bool("hash", false, "read a MindRouter key on stdin and print its allowlist line")
+	exportAllowlist := flags.String("export-allowlist", filepath.Join(home, ".config", "cass", "export-allowlist"), "person -> export permissions; exports are off if the file is absent")
+	exportRoot := flags.String("export-root", filepath.Join(home, ".local", "share", "cass-mcp", "exports"), "where exports are written")
+	exportSalt := flags.String("export-salt", filepath.Join(home, ".config", "cass", "export-salt"), "salt for pseudonymous identities")
+	exportAudit := flags.String("export-audit", filepath.Join(home, ".local", "share", "cass", "export-audit.jsonl"), "export audit log")
+	exportMaxRows := flags.Int64("export-max-rows", 2_000_000, "refuse a window holding more jobs than this")
+	exportTimeout := flags.Duration("export-timeout", 30*time.Minute, "longest one export may take")
+	exportRetention := flags.Duration("export-retention", 14*24*time.Hour, "how long a finished export is kept")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -80,6 +90,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	runner := chatRunner(*chat, *policy, *wazuhInsecure, *timeout)
 	validator := MindRouterValidator(*endpoint, &http.Client{Timeout: 10 * time.Second})
 	server := NewServer(allowlist, validator, runner, *maxInflight, *maxPerUser, stderr)
+	exports, reason := setupExports(*exportAllowlist, *exportRoot, *exportSalt, *exportAudit, *exportMaxRows, *exportTimeout, *exportRetention, stderr)
+	if exports == nil {
+		fmt.Fprintf(stderr, "cass-mcp: exports off: %s\n", reason)
+	} else {
+		server.exports = exports
+		exports.Sweep(time.Now())
+		go func() {
+			for range time.Tick(time.Hour) {
+				exports.Sweep(time.Now())
+			}
+		}()
+		fmt.Fprintf(stderr, "cass-mcp: exports on, written under %s\n", *exportRoot)
+	}
 
 	httpServer := &http.Server{
 		Addr:              *listen,
@@ -152,4 +175,52 @@ func withoutKey(environ []string) []string {
 func lastLine(text string) string {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	return lines[len(lines)-1]
+}
+
+// setupExports turns exports on only when every piece is in place: the
+// permissions file, a salt, the database and the definitions. Anything
+// missing leaves them off and says why; questions are unaffected.
+func setupExports(allowlistPath, root, saltPath, auditPath string, maxRows int64, timeout, retention time.Duration, log io.Writer) (*ExportService, string) {
+	permissions, err := NewExportPermissions(allowlistPath)
+	if err != nil {
+		return nil, "export allowlist: " + err.Error()
+	}
+	salt, err := os.ReadFile(saltPath)
+	if err != nil || len(salt) < 16 {
+		return nil, "export salt " + saltPath + " is missing or shorter than 16 bytes"
+	}
+	dsn := os.Getenv("CASS_PEGASUS_DSN")
+	if dsn == "" {
+		return nil, "CASS_PEGASUS_DSN is not set"
+	}
+	source, err := export.OpenMySQL(dsn, timeout)
+	if err != nil {
+		return nil, err.Error()
+	}
+	defs, err := export.LoadDefinitions()
+	if err != nil {
+		return nil, err.Error()
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err.Error()
+	}
+	return &ExportService{
+		Definitions: defs, Permissions: permissions, Source: source, FS: export.OSFS{}, Root: root, Salt: salt,
+		MaxRows: maxRows, Timeout: timeout, Retention: retention, AuditPath: auditPath, ToolVersion: buildVersion(),
+		Log: log, jobs: map[string]*exportJob{}, running: map[string]string{},
+	}, ""
+}
+
+// buildVersion is the commit this binary was built from.
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 12 {
+			return s.Value[:12]
+		}
+	}
+	return "unknown"
 }
