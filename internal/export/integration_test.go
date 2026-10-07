@@ -103,38 +103,20 @@ func TestLivePreTRESWindowKeepsUnknownsNull(t *testing.T) {
 	}
 }
 
-// The export query must use an index on SubmitTime through the view.
-func TestLiveExportQueryUsesTheSubmitTimeIndex(t *testing.T) {
+// The export query must reach runTBL2's SubmitTime index through the view,
+// which needs the view to merge into its base table. EXPLAIN would show it
+// directly but needs SHOW VIEW, which Cassandra's read-only login lacks
+// (Error 1345, 2026-10-07). MariaDB records MERGE, and marks a view
+// updatable, only when it merges; an unmergeable edit is downgraded to
+// UNDEFINED with only a warning, so this is the check that catches one.
+func TestLiveViewMergesIntoRunTBL2(t *testing.T) {
 	source := liveSource(t)
-	rows, err := source.DB.Query("EXPLAIN SELECT COUNT(*) FROM runTBL2_jobs WHERE SubmitTime >= ? AND SubmitTime < ?", juneStart, octStart)
+	var algorithm, updatable string
+	err := source.DB.QueryRow("SELECT algorithm, is_updatable FROM information_schema.views WHERE table_schema = DATABASE() AND table_name = 'runTBL2_jobs'").Scan(&algorithm, &updatable)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	columns, _ := rows.Columns()
-	seen := false
-	for rows.Next() {
-		values := make([]any, len(columns))
-		holders := make([]any, len(columns))
-		for i := range values {
-			holders[i] = &values[i]
-		}
-		rows.Scan(holders...)
-		row := map[string]string{}
-		for i, c := range columns {
-			if b, ok := values[i].([]byte); ok {
-				row[c] = string(b)
-			}
-		}
-		t.Logf("EXPLAIN: %v", row)
-		if row["table"] == "r" || row["table"] == "runTBL2" {
-			seen = true
-			if row["key"] == "" {
-				t.Errorf("runTBL2 is scanned without an index: %v", row)
-			}
-		}
-	}
-	if !seen {
-		t.Error("EXPLAIN shows no row for runTBL2; the view may not have merged")
+	if algorithm != "MERGE" || updatable != "YES" {
+		t.Errorf("runTBL2_jobs has algorithm %s, updatable %s; want MERGE and YES, or every query scans runTBL2 in full", algorithm, updatable)
 	}
 }

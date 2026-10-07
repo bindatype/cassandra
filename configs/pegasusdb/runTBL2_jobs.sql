@@ -40,8 +40,11 @@
 
 -- ALGORITHM=MERGE: queries against the view are merged into queries against
 -- runTBL2, so a SubmitTime bound still uses the SubmitTime index. If a future
--- edit makes the view unmergeable, creation fails rather than silently
--- turning every query into a full scan.
+-- edit makes the view unmergeable, MariaDB does NOT refuse it: it warns and
+-- records the algorithm as UNDEFINED. Check after re-creating it:
+--   SELECT algorithm, is_updatable FROM information_schema.views
+--   WHERE table_schema = 'pegasusdb' AND table_name = 'runTBL2_jobs';
+-- must say MERGE and YES. make test-export-live checks the same.
 -- SQL SECURITY INVOKER: the view reads with the caller's own rights, so it
 -- grants nothing extra and does not depend on the creating account existing.
 CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW runTBL2_jobs AS
