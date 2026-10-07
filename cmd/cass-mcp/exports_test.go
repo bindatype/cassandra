@@ -89,7 +89,7 @@ func exportServer(t *testing.T, permissions string, source export.Source) (*Serv
 	}
 	exports := &ExportService{
 		Definitions: defs, Permissions: perms, Source: source, FS: export.OSFS{}, Root: filepath.Join(dir, "exports"),
-		Salt: []byte("0123456789abcdef-salt"), MaxRows: 1000, Timeout: time.Minute, Retention: 14 * 24 * time.Hour,
+		Salt: []byte("0123456789abcdef-salt"), MaxRows: 1000, MaxRunning: 1, Timeout: time.Minute, Retention: 14 * 24 * time.Hour,
 		AuditPath: filepath.Join(dir, "export-audit.jsonl"), ToolVersion: "test", Log: io.Discard,
 		jobs: map[string]*exportJob{}, running: map[string]string{},
 	}
@@ -353,4 +353,26 @@ func TestTheExportToolTakesDatesNotEpochs(t *testing.T) {
 	if strings.Contains(rec.Body.String(), exportToolName) {
 		t.Error("export tools are listed on a server without exports configured")
 	}
+}
+
+// A long export is a full pass over runTBL2 on lucee, so only one runs at a
+// time across everyone, not just per person.
+func TestOneRunningExportAcrossEveryone(t *testing.T) {
+	block := make(chan struct{})
+	s, _ := exportServer(t, "glen export\nalice export\n", &memSource{rows: sampleRows(), block: block})
+	first := callExportTool(t, s, glenKey, exportToolName, exportRequest)
+	second := callExportTool(t, s, aliceKey, exportToolName, exportRequest)
+	close(block)
+	if first.Result.IsError || !second.Result.IsError || !strings.Contains(second.Result.Content[0].Text, "most allowed at once") {
+		t.Errorf("first %+v, second %+v", first.Result, second.Result)
+	}
+	var start map[string]any
+	json.Unmarshal(first.Result.StructuredContent, &start)
+	waitForExport(t, s, glenKey, start["export_id"].(string))
+	third := callExportTool(t, s, aliceKey, exportToolName, exportRequest)
+	if third.Result.IsError {
+		t.Fatalf("after the first finished, the next was still refused: %+v", third.Result)
+	}
+	json.Unmarshal(third.Result.StructuredContent, &start)
+	waitForExport(t, s, aliceKey, start["export_id"].(string))
 }

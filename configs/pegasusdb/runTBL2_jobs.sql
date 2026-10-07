@@ -39,7 +39,9 @@
 -- re-run this file to include them.
 
 -- ALGORITHM=MERGE: queries against the view are merged into queries against
--- runTBL2, so a SubmitTime bound still uses the SubmitTime index. If a future
+-- runTBL2, so runTBL2's indexes stay available to them; the optimizer still
+-- chooses whether to use one (for June-September 2026 it chose a full scan,
+-- EXPLAIN 2026-10-07, about 20 s; a correct result either way). If a future
 -- edit makes the view unmergeable, MariaDB does NOT refuse it: it warns and
 -- records the algorithm as UNDEFINED. Check after re-creating it:
 --   SELECT algorithm, is_updatable FROM information_schema.views

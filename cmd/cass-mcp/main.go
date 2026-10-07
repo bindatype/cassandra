@@ -56,6 +56,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	exportSalt := flags.String("export-salt", filepath.Join(home, ".config", "cass", "export-salt"), "salt for pseudonymous identities")
 	exportAudit := flags.String("export-audit", filepath.Join(home, ".local", "share", "cass", "export-audit.jsonl"), "export audit log")
 	exportMaxRows := flags.Int64("export-max-rows", 2_000_000, "refuse a window holding more jobs than this")
+	exportMaxRunning := flags.Int("export-max-running", 1, "exports running at once, across everyone")
 	exportTimeout := flags.Duration("export-timeout", 30*time.Minute, "longest one export may take")
 	exportRetention := flags.Duration("export-retention", 14*24*time.Hour, "how long a finished export is kept")
 	if err := flags.Parse(args); err != nil {
@@ -90,7 +91,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	runner := chatRunner(*chat, *policy, *wazuhInsecure, *timeout)
 	validator := MindRouterValidator(*endpoint, &http.Client{Timeout: 10 * time.Second})
 	server := NewServer(allowlist, validator, runner, *maxInflight, *maxPerUser, stderr)
-	exports, reason := setupExports(*exportAllowlist, *exportRoot, *exportSalt, *exportAudit, *exportMaxRows, *exportTimeout, *exportRetention, stderr)
+	exports, reason := setupExports(*exportAllowlist, *exportRoot, *exportSalt, *exportAudit, *exportMaxRows, *exportMaxRunning, *exportTimeout, *exportRetention, stderr)
 	if exports == nil {
 		fmt.Fprintf(stderr, "cass-mcp: exports off: %s\n", reason)
 	} else {
@@ -180,7 +181,7 @@ func lastLine(text string) string {
 // setupExports turns exports on only when every piece is in place: the
 // permissions file, a salt, the database and the definitions. Anything
 // missing leaves them off and says why; questions are unaffected.
-func setupExports(allowlistPath, root, saltPath, auditPath string, maxRows int64, timeout, retention time.Duration, log io.Writer) (*ExportService, string) {
+func setupExports(allowlistPath, root, saltPath, auditPath string, maxRows int64, maxRunning int, timeout, retention time.Duration, log io.Writer) (*ExportService, string) {
 	permissions, err := NewExportPermissions(allowlistPath)
 	if err != nil {
 		return nil, "export allowlist: " + err.Error()
@@ -206,7 +207,7 @@ func setupExports(allowlistPath, root, saltPath, auditPath string, maxRows int64
 	}
 	return &ExportService{
 		Definitions: defs, Permissions: permissions, Source: source, FS: export.OSFS{}, Root: root, Salt: salt,
-		MaxRows: maxRows, Timeout: timeout, Retention: retention, AuditPath: auditPath, ToolVersion: buildVersion(),
+		MaxRows: maxRows, MaxRunning: maxRunning, Timeout: timeout, Retention: retention, AuditPath: auditPath, ToolVersion: buildVersion(),
 		Log: log, jobs: map[string]*exportJob{}, running: map[string]string{},
 	}, ""
 }

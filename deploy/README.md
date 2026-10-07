@@ -216,8 +216,11 @@ missing, and questions are unaffected either way:
 Exports are written under `~/.local/share/cass-mcp/exports/<id>/` (0700,
 files 0600), kept 14 days (`-export-retention`), downloaded by their owner
 only at `https://<host>:8443/exports/<id>/<file>` with the same key, and
-audited to `~/.local/share/cass/export-audit.jsonl`. One running export per
-person; at most 2,000,000 rows (`-export-max-rows`) and 30 minutes
+audited to `~/.local/share/cass/export-audit.jsonl`. One export runs at a time
+across everyone (`-export-max-running`), because a long window is a full pass
+over `runTBL2` on lucee: for June-September 2026 the optimizer chose a scan
+over the `SubmitTime` index (EXPLAIN, 2026-10-07; the table statistics look
+stale), about 20 s. At most 2,000,000 rows (`-export-max-rows`) and 30 minutes
 (`-export-timeout`).
 
 Before turning exports on, run the live checks against the view:

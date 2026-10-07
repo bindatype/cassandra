@@ -112,6 +112,7 @@ type ExportService struct {
 	Root        string
 	Salt        []byte
 	MaxRows     int64
+	MaxRunning  int // exports running at once, across everyone
 	Timeout     time.Duration
 	Retention   time.Duration
 	AuditPath   string
@@ -156,6 +157,13 @@ func (e *ExportService) Start(caller Caller, raw json.RawMessage) map[string]any
 	if id, busy := e.running[caller.Person]; busy {
 		e.mu.Unlock()
 		return toolError("you already have export " + id + " running; check it with " + statusToolName)
+	}
+	// A long window is a full pass over runTBL2 on the production database
+	// (the optimizer chooses a scan for June-September; EXPLAIN 2026-10-07,
+	// about 20 s). One at a time keeps lucee from running several at once.
+	if limit := e.MaxRunning; limit > 0 && len(e.running) >= limit {
+		e.mu.Unlock()
+		return toolError(fmt.Sprintf("%d export(s) already running, the most allowed at once; try again in a minute", len(e.running)))
 	}
 	id := export.NewExportID()
 	job := &exportJob{id: id, owner: caller.Person, started: time.Now()}

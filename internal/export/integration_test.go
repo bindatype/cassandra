@@ -103,10 +103,11 @@ func TestLivePreTRESWindowKeepsUnknownsNull(t *testing.T) {
 	}
 }
 
-// The export query must reach runTBL2's SubmitTime index through the view,
-// which needs the view to merge into its base table. EXPLAIN would show it
-// directly but needs SHOW VIEW, which Cassandra's read-only login lacks
-// (Error 1345, 2026-10-07). MariaDB records MERGE, and marks a view
+// The view must merge into runTBL2, or every query against it materializes
+// the whole table first. Merging makes runTBL2's indexes available; whether
+// the optimizer uses one is its choice: for June-September 2026 it chose a
+// full scan (EXPLAIN by Glen on lucee, 2026-10-07; this login cannot EXPLAIN a
+// view without SHOW VIEW, Error 1345). MariaDB records MERGE, and marks a view
 // updatable, only when it merges; an unmergeable edit is downgraded to
 // UNDEFINED with only a warning, so this is the check that catches one.
 func TestLiveViewMergesIntoRunTBL2(t *testing.T) {
@@ -117,6 +118,6 @@ func TestLiveViewMergesIntoRunTBL2(t *testing.T) {
 		t.Fatal(err)
 	}
 	if algorithm != "MERGE" || updatable != "YES" {
-		t.Errorf("runTBL2_jobs has algorithm %s, updatable %s; want MERGE and YES, or every query scans runTBL2 in full", algorithm, updatable)
+		t.Errorf("runTBL2_jobs has algorithm %s, updatable %s; want MERGE and YES, or every query materializes runTBL2 first", algorithm, updatable)
 	}
 }
