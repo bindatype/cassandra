@@ -1,0 +1,27 @@
+# vLLM serving gemma4-31b-vllm on 127.0.0.1:18080, the MindRouter backend
+# "ollama-sgtstubby". A glenamac user service (linger is on, so it starts at
+# boot). Installed copy: ~/.config/systemd/user/vllm-gemma4.service.
+# See deploy/README.md, "vLLM (gemma4) service".
+[Unit]
+Description=vLLM serving gemma4-31b-vllm on 127.0.0.1:18080
+Documentation=https://github.com/bindatype/cassandra/blob/main/deploy/README.md
+After=network-online.target
+# A broken setting must not restart forever: three failures in an hour stop it.
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=simple
+# Keep the previous run's log as .1, so the log cannot grow without bound.
+ExecStartPre=/bin/sh -c 'mkdir -p %h/logs && if [ -f %h/logs/vllm-gemma4.log ]; then mv -f %h/logs/vllm-gemma4.log %h/logs/vllm-gemma4.log.1; fi'
+ExecStart=/bin/bash %h/vllm/start-gemma4.sh
+StandardOutput=append:%h/logs/vllm-gemma4.log
+StandardError=inherit
+Restart=on-failure
+RestartSec=30
+# The tensor-parallel workers must release the GPUs before anything restarts.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

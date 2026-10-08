@@ -229,3 +229,67 @@ Before turning exports on, run the live checks against the view:
 set -a; . ~/.config/cass/env; set +a
 make test-export-live
 ```
+
+## vLLM (gemma4) service
+
+`gemma4-31b-vllm`, the model Cassandra and the Xenolith testers use through
+MindRouter (backend `ollama-sgtstubby`, `http://127.0.0.1:18080`), is served
+by vLLM on sgtstubby's four RTX 6000 Ada GPUs. It is not part of Cassandra,
+but Cassandra depends on it, so its service and recipe live here, in
+`deploy/vllm/`. Chosen 2026-10-08: stability on this host first, portability
+by recipe; containers when a second host needs the same serving stack.
+
+| File | Installed as | What it is |
+| --- | --- | --- |
+| `vllm-gemma4.user.service` | `~/.config/systemd/user/vllm-gemma4.service` | glenamac user unit (linger is on, so it starts at boot); restarts on failure after 30 s, gives up after 3 failures in an hour; 90 s for the GPU workers to stop |
+| `start-gemma4.sh` | `~/vllm/start-gemma4.sh` | Builds the `vllm serve` command from the settings; refuses to start if the chat template's sha256 or the pinned model revision does not match; `VLLM_DRY_RUN=1` prints the command instead |
+| `gemma4.env.example` | `~/.config/vllm/gemma4.env` | Every setting: model, pinned revision, slots (`VLLM_MAX_NUM_SEQS`), context length, GPUs, `HF_HUB_OFFLINE=1` |
+| `tool_chat_template_gemma4.jinja` | `~/vllm/tool_chat_template_gemma4.jinja` | sha256 `84af2a627a6e7489a9afe89e95dc6068d545999dd19fce89f34e9cedade71a35` |
+| `requirements-vllm-cu128.lock` | — | `pip freeze` of `~/venvs/vllm-cu128` (vllm 0.21.0, torch 2.11.0+cu128, Python 3.11.13; driver 595.71.05) |
+
+Log: `~/logs/vllm-gemma4.log`, the previous run's kept as `.1`.
+
+**Changing a setting** (for example the slot count): edit
+`~/.config/vllm/gemma4.env`, then `systemctl --user restart vllm-gemma4`. A
+restart is a 2-4 minute outage of the model (a changed slot count also
+recompiles, about 3 minutes more). Keep MindRouter's **Max Concurrent** for
+`ollama-sgtstubby` equal to `VLLM_MAX_NUM_SEQS`.
+
+**Install** (copies files; starts nothing):
+
+```sh
+cd /home/glenamac/dev/cassandra
+mkdir -p ~/vllm ~/.config/vllm ~/logs
+install -m 755 deploy/vllm/start-gemma4.sh ~/vllm/start-gemma4.sh
+cmp deploy/vllm/tool_chat_template_gemma4.jinja ~/vllm/tool_chat_template_gemma4.jinja
+[ -e ~/.config/vllm/gemma4.env ] || install -m 600 deploy/vllm/gemma4.env.example ~/.config/vllm/gemma4.env
+install -m 644 deploy/vllm/vllm-gemma4.user.service ~/.config/systemd/user/vllm-gemma4.service
+systemctl --user daemon-reload
+VLLM_DRY_RUN=1 ~/vllm/start-gemma4.sh
+```
+
+**Switching over** from a hand-started vLLM (an outage of a few minutes):
+stop the hand-started one (Ctrl-C in its tmux window, and wait until
+`nvidia-smi` shows the GPUs empty), then
+
+```sh
+systemctl --user enable --now vllm-gemma4
+until curl -sf -o /dev/null http://127.0.0.1:18080/health; do sleep 10; done; echo ready
+```
+
+Two vLLMs cannot share these GPUs: a second one fails at startup with "Free
+memory on device ... is less than desired GPU memory utilization" and leaves
+the first untouched (seen 2026-10-08, when a dry run was started without
+`VLLM_DRY_RUN=1`).
+
+**Rebuilding on another host:** a driver supporting CUDA 12.8, Python 3.11, then
+
+```sh
+python3.11 -m venv ~/venvs/vllm-cu128
+~/venvs/vllm-cu128/bin/pip install -r deploy/vllm/requirements-vllm-cu128.lock --extra-index-url https://download.pytorch.org/whl/cu128
+HF_HOME=<cache> ~/venvs/vllm-cu128/bin/hf download google/gemma-4-31B-it --revision 842da3794eaa0b77d5f08bae87a17459d91ff475
+```
+
+(Gemma needs a Hugging Face account that has accepted its licence), then
+install as above with `HF_HOME`, `CUDA_VISIBLE_DEVICES` and `VLLM_TP` set for
+that host.
