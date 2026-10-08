@@ -151,7 +151,12 @@ digest "Wazuh agents" "how many agents are disconnected right now, and are any o
 # one row before the window ran, fixed 2026-09-25). Asking for tail latency
 # here is what that fix was for -- median alone hides a queue that is fine on
 # average and terrible in the tail.
-digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, and for the cpu partition and the gpu partition, what was the median (P50) and 95th percentile (P95) wait time? Say which day, give wait times in seconds and minutes, and list each partition's P50 and P95 as a short bulleted list."
+#
+# Counts by workload class, wait times by partition (Glen, 2026-10-08). A GPU
+# job is one that requested a GPU, on any partition (runTBL2_workload), which
+# is not the same as a job on the partition named gpu; the labels say which is
+# which so the two kinds of figure cannot be read as the same thing.
+digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, in total and broken out by the workload column of the runTBL2_workload view (gpu, cpu and excluded, naming any unclassified); and for the cpu partition and the gpu partition, what was the median (P50) and 95th percentile (P95) wait time? Say which day. List completed and failed as short bulleted lists, total first, then 'GPU jobs (requested a GPU, any partition)', 'CPU jobs' and 'Excluded (nano and staff partitions)'. Give wait times in seconds and minutes, listing each partition's P50 and P95 as a short bulleted list headed 'cpu partition' and 'gpu partition'."
 
 # Longest-open tickets, not new ones: anyone can see what's new by logging
 # into RT itself, so that told the channel nothing it couldn't already see.
