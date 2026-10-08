@@ -392,6 +392,7 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 	seenFailure := map[string]string{}
 	seenError := map[string]bool{}
 	var lastError string
+	sqlPushedBack := false
 	for turn := 0; turn < maxToolCalls; turn++ {
 		choice, err := s.complete(ctx, turn, messages, tools, forceTool)
 		forceTool = ""
@@ -423,6 +424,23 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 				s.event.Status = "failed"
 				s.event.Error = "empty_answer: " + detail
 				return "", fmt.Errorf("model returned neither a tool call nor an answer")
+			}
+			// An answer may not vouch for SQL that never ran. With a turn
+			// left, the first time, send it back; otherwise deliver it with a
+			// warning that says so (sqlclaims.go).
+			if unrun := unrunSQL(answer, s.event.Calls); len(unrun) > 0 {
+				detail := fmt.Sprintf("%d quoted statement(s) not executed; first: %.200s", len(unrun), unrun[0])
+				if !sqlPushedBack && turn < maxToolCalls-1 {
+					sqlPushedBack = true
+					s.record("unrun_sql_claimed", detail, false)
+					messages = append(messages,
+						Message{Role: "assistant", Content: answer},
+						Message{Role: "user", Content: unrunSQLPushback(unrun[0])},
+					)
+					continue
+				}
+				s.record("unrun_sql_in_answer", detail, false)
+				answer = unrunSQLWarning + "\n\n" + answer
 			}
 			if turn == 0 {
 				s.record("model_answered_directly", "no tool call proposed", true)

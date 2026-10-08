@@ -156,7 +156,12 @@ digest "Wazuh agents" "how many agents are disconnected right now, and are any o
 # job is one that requested a GPU, on any partition (runTBL2_workload), which
 # is not the same as a job on the partition named gpu; the labels say which is
 # which so the two kinds of figure cannot be read as the same thing.
-digest "Scheduler" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, in total and broken out by the workload column of the runTBL2_workload view (gpu, cpu and excluded, naming any unclassified); and for the cpu partition and the gpu partition, what was the median (P50) and 95th percentile (P95) wait time? Say which day. List completed and failed as short bulleted lists, total first, then 'GPU jobs (requested a GPU, any partition)', 'CPU jobs' and 'Excluded (nano and staff partitions)'. Give wait times in seconds and minutes, listing each partition's P50 and P95 as a short bulleted list headed 'cpu partition' and 'gpu partition'."
+# Two questions, not one (2026-10-08): asked together, one run answered the
+# counts and invented the wait times, with a "SQL Ran" listing for a query it
+# never executed. Smaller questions skip less, and a failure costs half the
+# section; Cassandra now also refuses an answer that quotes SQL it did not run.
+digest "Scheduler: jobs" "for the most recent complete day in runTBL2: how many jobs completed and how many failed, in total and broken out by the workload column of the runTBL2_workload view (gpu, cpu and excluded, naming any unclassified)? Say which day. List completed and failed as short bulleted lists, total first, then 'GPU jobs (requested a GPU, any partition)', 'CPU jobs' and 'Excluded (nano and staff partitions)'."
+digest "Scheduler: wait times" "for the most recent complete day in runTBL2, for the cpu partition and the gpu partition: what was the median (P50) and 95th percentile (P95) wait time? Say which day. Give wait times in seconds and minutes, listing each partition's P50 and P95 as a short bulleted list headed 'cpu partition' and 'gpu partition'."
 
 # Longest-open tickets, not new ones: anyone can see what's new by logging
 # into RT itself, so that told the channel nothing it couldn't already see.
