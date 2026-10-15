@@ -529,7 +529,7 @@ interactive shell but not inherited by child processes, which has cost
 time on three separate occasions.
 
 Where the Wazuh manager presents a certificate that does not verify by name
-(the RTS manager serves Wazuh's factory certificate, CN `wazuh.com`), pin it:
+(for example Wazuh's factory certificate, CN `wazuh.com`), pin it:
 save it once and point `CASS_WAZUH_CERT` at the file. Any other certificate is
 then refused.
 

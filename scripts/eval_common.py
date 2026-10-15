@@ -69,11 +69,10 @@ def default_model():
     return FALLBACK_MODEL
 
 # Zabbix and RT present certificates that verify normally, so their probes use
-# the default context. The Wazuh manager does not: it serves Wazuh's factory
-# certificate (self-signed, CN wazuh.com), reached over the public internet.
-# Its probes trust only the pinned copy named by CASS_WAZUH_CERT -- the same pin
-# cass-chat uses -- with hostname checking off because that certificate names
-# no host we connect to. Verification was previously disabled for all three.
+# the default context. A Wazuh manager may not (Wazuh's factory certificate is
+# self-signed, CN wazuh.com), so its probes trust only the pinned copy named by
+# CASS_WAZUH_CERT -- the same pin cass-chat uses -- with hostname checking off,
+# because such a certificate names no host we connect to.
 def _wazuh_ctx():
     path = env_value("CASS_WAZUH_CERT")
     if not path:
