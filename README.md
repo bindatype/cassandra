@@ -376,7 +376,6 @@ A question in natural language, answered from live evidence:
 source ~/.config/cass/env
 go run ./cmd/cass-chat \
   -policy ./configs/broker-policy.example.json \
-  -wazuh-insecure \
   "what problems are active on dss01?"
 ```
 
@@ -529,8 +528,20 @@ Note `export`. A variable merely set in `~/.bashrc` is visible to an
 interactive shell but not inherited by child processes, which has cost
 time on three separate occasions.
 
-`-wazuh-insecure` is required where the Wazuh manager presents a
-self-signed certificate. It warns rather than defaulting to trust.
+Where the Wazuh manager presents a certificate that does not verify by name
+(the RTS manager serves Wazuh's factory certificate, CN `wazuh.com`), pin it:
+save it once and point `CASS_WAZUH_CERT` at the file. Any other certificate is
+then refused.
+
+```bash
+openssl s_client -connect wazuh.example.edu:55000 </dev/null 2>/dev/null |
+  openssl x509 > ~/.config/cass/wazuh-api.pem
+export CASS_WAZUH_CERT=$HOME/.config/cass/wazuh-api.pem
+```
+
+Check the fingerprint against the manager itself before trusting the file.
+`-wazuh-insecure` still exists, warns, and cannot be combined with a pin. No
+deployment should need it.
 
 ## Evaluations
 

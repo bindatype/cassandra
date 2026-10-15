@@ -2,8 +2,11 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,10 +57,18 @@ type WazuhConfig struct {
 	Password         string
 	Timeout          time.Duration
 	MaxResponseBytes int64
-	// InsecureSkipVerify disables TLS verification. The RTS manager's API
-	// certificate does not verify for the name Cassandra uses, so this is
-	// needed there today, but it is never the default.
+	// InsecureSkipVerify disables TLS verification. It is never the default,
+	// and with PinnedCertificatePEM available no deployment needs it; it
+	// remains as an explicit, warned-about escape hatch.
 	InsecureSkipVerify bool
+	// PinnedCertificatePEM, when set, is the certificate the API must present,
+	// compared byte for byte. It replaces hostname and chain checks rather
+	// than skipping them: any other certificate is refused. It exists for a
+	// manager whose certificate cannot verify by name -- the RTS manager still
+	// serves Wazuh's factory certificate, self-signed with CN wazuh.com, and is
+	// reached over the public internet. Mutually exclusive with
+	// InsecureSkipVerify.
+	PinnedCertificatePEM []byte
 	// CriticalGroups names the agent groups whose loss is worth escalating
 	// (site configuration; at RTS, RTS_Ops and Viper). The summary counts
 	// agents that are both disconnected and in one of them, in code.
@@ -111,10 +122,12 @@ func NewWazuhConnector(config WazuhConfig) (*WazuhConnector, error) {
 		maxBytes = wazuhMaxResponseBytes
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if config.InsecureSkipVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	tlsConfig, err := wazuhTLSConfig(config)
+	if err != nil {
+		return nil, err
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
 
 	critical := make(map[string]struct{}, len(config.CriticalGroups))
 	for _, group := range config.CriticalGroups {
@@ -547,4 +560,76 @@ func summarizeAgents(agents []wazuhAgent, critical map[string]struct{}) map[stri
 		}
 	}
 	return summary
+}
+
+// wazuhTLSConfig decides how the API's certificate is checked: against a pinned
+// certificate, normally, or -- only on explicit request -- not at all.
+func wazuhTLSConfig(config WazuhConfig) (*tls.Config, error) {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	pinned := len(config.PinnedCertificatePEM) > 0
+	switch {
+	case pinned && config.InsecureSkipVerify:
+		return nil, fmt.Errorf("wazuh: a pinned certificate and InsecureSkipVerify are mutually exclusive; with both, the pin would be ignored")
+	case pinned:
+		pins, err := parsePinnedCertificates(config.PinnedCertificatePEM)
+		if err != nil {
+			return nil, err
+		}
+		// Go's standard verification cannot accept this certificate at all: it
+		// names no host Cassandra connects to, and Go no longer honours a bare
+		// Common Name. VerifyConnection replaces that check with an exact match,
+		// which is stricter than chain verification, not weaker.
+		tlsConfig.InsecureSkipVerify = true // nosemgrep: replaced by the VerifyConnection pin below
+		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+			return verifyPinned(state.PeerCertificates, pins, time.Now())
+		}
+	case config.InsecureSkipVerify:
+		tlsConfig.InsecureSkipVerify = true
+	}
+	return tlsConfig, nil
+}
+
+func parsePinnedCertificates(data []byte) ([]*x509.Certificate, error) {
+	var pins []*x509.Certificate
+	for rest := data; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("wazuh: parse pinned certificate: %w", err)
+		}
+		pins = append(pins, cert)
+	}
+	if len(pins) == 0 {
+		return nil, fmt.Errorf("wazuh: the pinned certificate file holds no PEM CERTIFICATE block")
+	}
+	return pins, nil
+}
+
+// verifyPinned accepts the connection only if the server's leaf certificate is
+// one of the pins and has not expired. Several pins let a replacement be added
+// before the old certificate is retired.
+func verifyPinned(presented, pins []*x509.Certificate, now time.Time) error {
+	if len(presented) == 0 {
+		return fmt.Errorf("wazuh API presented no certificate")
+	}
+	leaf := presented[0]
+	for _, pin := range pins {
+		if !leaf.Equal(pin) {
+			continue
+		}
+		if now.After(leaf.NotAfter) {
+			return fmt.Errorf("wazuh API certificate matches the pin but expired %s; pin the renewed certificate",
+				leaf.NotAfter.UTC().Format(time.RFC3339))
+		}
+		return nil
+	}
+	return fmt.Errorf("wazuh API presented a certificate that is not the pinned one (sha256 %x); if the manager's certificate was replaced, pin the new one",
+		sha256.Sum256(leaf.Raw))
 }

@@ -17,7 +17,7 @@ go build -o "$BIN/cass-broker-plan" "$ROOT/cmd/cass-broker-plan"
 go build -o "$BIN/cass-broker-exec" "$ROOT/cmd/cass-broker-exec"
 
 AUDIT=$(mktemp "${TMPDIR:-/tmp}/cass-demo-audit.XXXXXX")
-ask() { "$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure -audit "$AUDIT" "$@"; }
+ask() { "$BIN/cass-chat" -policy "$POLICY" -audit "$AUDIT" "$@"; }
 
 rule() { printf '\n\033[1m%s\033[0m\n%s\n' "$1" "----------------------------------------------------------------"; }
 

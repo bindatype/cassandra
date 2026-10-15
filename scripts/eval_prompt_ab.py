@@ -27,7 +27,7 @@ Ground truth is computed live, immediately before each run, because these
 counts move: the active problem total was observed at 1841, 1458, 1846, 1844
 and 1850 across a single afternoon.
 """
-import datetime, json, os, ssl, subprocess, sys, time, urllib.request
+import datetime, json, os, subprocess, sys, time, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from eval_common import (build_chat, default_model, first_sentence, normalize,
@@ -40,10 +40,6 @@ BASELINE_REV = os.environ.get("BASELINE_REV", "e94a4dd")
 RUNS = int(os.environ.get("RUNS", "3"))
 DEFAULT_MODEL = default_model()
 
-_CTX = ssl.create_default_context()
-_CTX.check_hostname = False
-_CTX.verify_mode = ssl.CERT_NONE
-
 AGENT_MATCH = "Zabbix agent is not available"
 
 
@@ -54,7 +50,7 @@ def zabbix(method, params):
         os.environ["CASS_ZABBIX_ENDPOINT"], data=body, method="POST",
         headers={"Content-Type": "application/json-rpc",
                  "Authorization": "Bearer " + os.environ["ZABBIX_RO_TOKEN"]})
-    return json.load(urllib.request.urlopen(req, context=_CTX, timeout=60))["result"]
+    return json.load(urllib.request.urlopen(req, timeout=60))["result"]
 
 
 FIRING = {"only_true": True, "monitored": True, "skipDependent": True}
@@ -120,7 +116,7 @@ def ask(binary, model, prompt_path, question):
     started = time.time()
     try:
         proc = subprocess.run(
-            [binary, "-policy", policy_path(), "-wazuh-insecure", "-model", model, question],
+            [binary, "-policy", policy_path(), "-model", model, question],
             capture_output=True, text=True, timeout=420, env=env, cwd=ROOT)
     except subprocess.TimeoutExpired:
         return "", round(time.time() - started, 1)

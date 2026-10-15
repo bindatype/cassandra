@@ -12,8 +12,8 @@ After=network-online.target
 [Service]
 Type=simple
 # Host-specific flags live outside the unit, as CASS_MCP_EXTRA_FLAGS=... in
-# this optional file; for Wazuh questions, "-wazuh-insecure" (as askcass does
-# for Wazuh's localhost-only certificate). Then: systemctl --user restart cass-mcp
+# this optional file. Wazuh needs none: its certificate is pinned through
+# CASS_WAZUH_CERT in the env file. Then: systemctl --user restart cass-mcp
 EnvironmentFile=-%h/.config/cass/cass-mcp.flags
 # The env file is shell syntax (export lines), so it is sourced, not read as an EnvironmentFile.
 ExecStart=/bin/bash -c 'set -a; . %h/.config/cass/env; set +a; exec %h/.local/share/cass-mcp/bin/cass-mcp \

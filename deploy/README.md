@@ -175,7 +175,7 @@ deploy that changed how questions are answered.
 | --- | --- | --- |
 | Binaries, policy snapshot, `BUILD` | `~/.local/share/cass-mcp/bin/`, each with a `.prev` | Yes |
 | Unit | `~/.config/systemd/user/cass-mcp.service`, from `deploy/cass-mcp.user.service` | Yes; edit the repo copy |
-| Host flags (`CASS_MCP_EXTRA_FLAGS`, e.g. `-wazuh-insecure`) | `~/.config/cass/cass-mcp.flags` | No |
+| Host flags (`CASS_MCP_EXTRA_FLAGS`; normally empty, since the Wazuh pin comes from `CASS_WAZUH_CERT` in the env file) | `~/.config/cass/cass-mcp.flags` | No |
 | TLS | `~/.local/share/cass-mcp/tls/` (`ca.pem`, `cert.pem`, `key.pem`) | No; it warns 30 days before `cert.pem` expires |
 | Source credentials | `~/.config/cass/env` | No |
 | Allowlist | `~/.config/cass/mcp-allowlist` | No |

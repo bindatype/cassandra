@@ -28,6 +28,8 @@ const (
 	wazuhEndpointEnv      = "CASS_WAZUH_ENDPOINT"
 	wazuhUsernameEnv      = "WAZUH_API_USERNAME"
 	wazuhPasswordEnv      = "WAZUH_API_PASSWORD"
+	// wazuhCertEnv names a PEM file holding the Wazuh API certificate to pin.
+	wazuhCertEnv = "CASS_WAZUH_CERT"
 	// wazuhCriticalGroupsEnv names the agent groups whose loss is escalated,
 	// comma-separated (site configuration; at RTS, "RTS_Ops,Viper").
 	wazuhCriticalGroupsEnv = "CASS_WAZUH_CRITICAL_GROUPS"
@@ -68,7 +70,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	endpoint := flags.String("mindrouter-endpoint", env.Get(mindrouterEndpointEnv), "MindRouter base URL")
 	zabbixEndpoint := flags.String("zabbix-endpoint", env.Get(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
 	wazuhEndpoint := flags.String("wazuh-endpoint", env.Get(wazuhEndpointEnv), "Wazuh API base URL")
-	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API")
+	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API (prefer -wazuh-cert)")
+	wazuhCert := flags.String("wazuh-cert", env.Get(wazuhCertEnv), "PEM file of the Wazuh API certificate to pin; any other certificate is refused")
 	rtEndpoint := flags.String("rt-endpoint", env.Get(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
 	showTrace := flags.Bool("trace", false, "print the policy decision trace to stderr")
 	auditPath := flags.String("audit", env.Get(auditPathEnv), "append a JSON-lines audit record for each question")
@@ -111,7 +114,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	session, err := buildSession(*policyPath, *model, *endpoint, *zabbixEndpoint, *wazuhEndpoint, *rtEndpoint, *wazuhInsecure, *showTrace)
+	session, err := buildSession(*policyPath, *model, *endpoint, *zabbixEndpoint, *wazuhEndpoint, *rtEndpoint, *wazuhCert, *wazuhInsecure, *showTrace)
 	if err != nil {
 		fmt.Fprintf(stderr, "cass-chat: %v\n", err)
 		return 2
@@ -182,7 +185,7 @@ func configuredModel() string {
 	return defaultModel
 }
 
-func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rtEndpoint string, wazuhInsecure, trace bool) (*orchestrator.Session, error) {
+func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rtEndpoint, wazuhCert string, wazuhInsecure, trace bool) (*orchestrator.Session, error) {
 	policyFile, err := os.Open(policyPath)
 	if err != nil {
 		return nil, fmt.Errorf("open policy: %w", err)
@@ -256,12 +259,17 @@ func buildSession(policyPath, model, endpoint, zabbixEndpoint, wazuhEndpoint, rt
 		connectors = append(connectors, zabbix)
 	}
 	if wazuhEndpoint != "" && env.Get(wazuhUsernameEnv) != "" && env.Get(wazuhPasswordEnv) != "" {
+		pinned, err := readPinnedCertificate(wazuhCert)
+		if err != nil {
+			return nil, err
+		}
 		wazuh, err := connector.NewWazuhConnector(connector.WazuhConfig{
-			Endpoint:           wazuhEndpoint,
-			Username:           env.Get(wazuhUsernameEnv),
-			Password:           env.Get(wazuhPasswordEnv),
-			InsecureSkipVerify: wazuhInsecure,
-			CriticalGroups:     splitList(env.Get(wazuhCriticalGroupsEnv)),
+			Endpoint:             wazuhEndpoint,
+			Username:             env.Get(wazuhUsernameEnv),
+			Password:             env.Get(wazuhPasswordEnv),
+			InsecureSkipVerify:   wazuhInsecure,
+			PinnedCertificatePEM: pinned,
+			CriticalGroups:       splitList(env.Get(wazuhCriticalGroupsEnv)),
 		})
 		if err != nil {
 			return nil, err
@@ -445,4 +453,19 @@ func thinkingSettings() (bool, int, error) {
 		return false, 0, fmt.Errorf("%s is set but %s is not on", thinkingBudgetEnv, thinkingEnv)
 	}
 	return on, budget, nil
+}
+
+// readPinnedCertificate loads the Wazuh certificate pin, if one is configured.
+// A configured but unreadable pin is an error rather than a silent fallback to
+// no pin, which would make every Wazuh question fail verification without
+// saying why.
+func readPinnedCertificate(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s (%s): %w", wazuhCertEnv, path, err)
+	}
+	return data, nil
 }

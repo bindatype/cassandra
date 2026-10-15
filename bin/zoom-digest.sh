@@ -109,7 +109,7 @@ digest() {
 	*) return 0 ;;
 	esac
 
-	if answer=$("$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure "$question" 2>&1); then
+	if answer=$("$BIN/cass-chat" -policy "$POLICY" "$question" 2>&1); then
 		body=$answer
 	else
 		title="$title (failed)"

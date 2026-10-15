@@ -71,4 +71,4 @@ mkdir -p "$BIN"
 # meant to be run from wherever you happen to be standing.
 (cd "$ROOT" && go build -o "$BIN/cass-chat" ./cmd/cass-chat)
 
-exec "$BIN/cass-chat" -policy "$POLICY" -wazuh-insecure "$@"
+exec "$BIN/cass-chat" -policy "$POLICY" "$@"
