@@ -64,10 +64,9 @@ type WazuhConfig struct {
 	// PinnedCertificatePEM, when set, is the certificate the API must present,
 	// compared byte for byte. It replaces hostname and chain checks rather
 	// than skipping them: any other certificate is refused. It exists for a
-	// manager whose certificate cannot verify by name -- the RTS manager still
-	// serves Wazuh's factory certificate, self-signed with CN wazuh.com, and is
-	// reached over the public internet. Mutually exclusive with
-	// InsecureSkipVerify.
+	// manager whose certificate cannot verify by name, such as one still
+	// serving Wazuh's factory certificate (self-signed, CN wazuh.com).
+	// Mutually exclusive with InsecureSkipVerify.
 	PinnedCertificatePEM []byte
 	// CriticalGroups names the agent groups whose loss is worth escalating
 	// (site configuration; at RTS, RTS_Ops and Viper). The summary counts

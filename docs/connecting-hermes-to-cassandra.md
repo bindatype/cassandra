@@ -5,22 +5,28 @@ workstation, over MCP. When it works, "ask cass: what are the oldest open
 tickets?" in Hermes comes back with an answer drawn from RT, Zabbix, Wazuh,
 PegasusDB or a host. You never hold any of those systems' credentials.
 
-Cassandra runs on sgtstubby as the `cass-mcp` service, at
-`https://sgtstubby.arc.gwu.edu:8443/mcp`. Hermes sends your own MindRouter key
-with every question. Cassandra checks the key against its allowlist, then
-asks MindRouter whether the key is still valid, then answers on your key.
+Cassandra serves MCP through the `cass-mcp` service, at an address your
+administrator gives you, of the form `https://cassandra.example.edu:8443/mcp`.
+Hermes sends your own MindRouter key with every question. Cassandra checks
+the key against its allowlist, then asks MindRouter whether the key is still
+valid, then answers on your key.
 
-Expect about 15 minutes. Step 1 needs Glen; the rest you do yourself.
+Expect about 15 minutes. Steps 1 and 2 need your Cassandra administrator; the
+rest you do yourself.
 
 ## What you need
 
-- **Campus network or the VPN.** Port 8443 is not reachable from outside.
+- **A network that can reach the `cass-mcp` port.** Deployments normally keep
+  it off the public internet, so this usually means the site network or its
+  VPN.
 - **Hermes** installed and working with a model. Hermes Desktop and the
   `hermes` command share `~/.hermes`, so the commands below configure the
   desktop app too; restart it after step 6.
 - **Your own MindRouter API key.** Never use someone else's: Cassandra records
   every question under the name your key maps to.
-- **A checkout of this repository** (`main`), for the skills in step 6.
+- **A terminal with `curl` and `tar`.** Both come with macOS and Linux; step 6
+  uses them to download two small skill folders. No copy of this repository
+  is needed.
 
 ## 1. Get your key onto the allowlist
 
@@ -34,43 +40,31 @@ read -rs KEY && printf '%s' "$KEY" | shasum -a 256
 
 On Linux, use `sha256sum` in place of `shasum -a 256`.
 
-Send Glen the 64-character hex string, and the name you want to appear in
-the audit log. He adds a line `sha256:<hash> <name>` to the allowlist, which
-takes effect without a restart.
+Send your administrator the 64-character hex string, and the name you want to
+appear in the audit log. They add a line `sha256:<hash> <name>` to the
+allowlist, which takes effect without a restart.
 
 `printf '%s'` matters: `echo` adds a newline, which changes the hash. On a
-machine with a Go toolchain, `go run ./cmd/cass-mcp -hash` from the checkout
+machine with a Go toolchain, `go run ./cmd/cass-mcp -hash` from a checkout
 reads the key on stdin and prints the finished line.
 
 ## 2. Save the certificate authority file
 
-Until the university certificate is in place, `cass-mcp` uses a development
-certificate signed by a small private CA, "Cassandra MCP development CA",
-valid to 2 October 2027. It is a public certificate, not a secret:
+If your deployment's `cass-mcp` certificate is not signed by a CA your machine
+already trusts, your administrator gives you the CA certificate, and its
+SHA-256 fingerprint through a separate channel. It is a public certificate,
+not a secret. Save it as `~/.config/cass/cass-mcp-ca.pem`, then check it:
 
 ```sh
 mkdir -p ~/.config/cass
-cat > ~/.config/cass/cass-mcp-dev-ca.pem <<'EOF'
------BEGIN CERTIFICATE-----
-MIIBtjCCAVygAwIBAgIURRcSWgjjSgUjoBdmfl5iJblY5aowCgYIKoZIzj0EAwIw
-JzElMCMGA1UEAwwcQ2Fzc2FuZHJhIE1DUCBkZXZlbG9wbWVudCBDQTAeFw0yNjEw
-MDIxNTE1MDdaFw0yNzEwMDIxNTE1MDdaMCcxJTAjBgNVBAMMHENhc3NhbmRyYSBN
-Q1AgZGV2ZWxvcG1lbnQgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATUusfe
-yVMDmAa6hSFo6cfoGf3MBcrll1n3yk1eW1AWi8bOEAZKym7LGDJmVk+cfKEHWaUm
-pG6aoi7bmJrkvvzRo2YwZDAdBgNVHQ4EFgQUmW4PNKixlL0KFatO/RVj/I++bVQw
-HwYDVR0jBBgwFoAUmW4PNKixlL0KFatO/RVj/I++bVQwEgYDVR0TAQH/BAgwBgEB
-/wIBADAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDSAAwRQIgNCExtTfrrYBa
-hyk+v7Gc7OdAYXPwyNjS/wrb3V8/JxECIQCCwI3wUo/QroAtxh2RYHmqIhwcTMI/
-HdJOuMzyJesChQ==
------END CERTIFICATE-----
-EOF
-openssl x509 -in ~/.config/cass/cass-mcp-dev-ca.pem -noout -fingerprint -sha256
+# save the file your administrator sent as ~/.config/cass/cass-mcp-ca.pem, then:
+openssl x509 -in ~/.config/cass/cass-mcp-ca.pem -noout -fingerprint -sha256
 ```
 
-The last line must print
-`86:C7:2F:09:74:A9:48:AC:15:94:B4:63:46:48:33:8F:51:77:92:4A:10:EF:45:0B:09:DA:F3:8D:6F:55:CB:5F`.
-If it doesn't, the copy is damaged; stop. Never turn certificate
-verification off to get past this step.
+The fingerprint must match the one your administrator gave you. If it
+doesn't, stop. Never turn certificate verification off to get past this step.
+If the certificate is publicly trusted, skip this step and the `ssl_verify`
+line in step 4.
 
 ## 3. Put the key where Hermes can read it
 
@@ -83,17 +77,19 @@ printf 'CASS_MCP_KEY=%s\n' "$KEY" >> ~/.hermes/.env && chmod 600 ~/.hermes/.env 
 
 ## 4. Configure the server
 
+Use the address your administrator gave you:
+
 ```sh
-hermes config set mcp_servers.cassandra.url https://sgtstubby.arc.gwu.edu:8443/mcp
+hermes config set mcp_servers.cassandra.url https://cassandra.example.edu:8443/mcp
 hermes config set mcp_servers.cassandra.headers.Authorization 'Bearer ${CASS_MCP_KEY}'
-hermes config set mcp_servers.cassandra.ssl_verify ~/.config/cass/cass-mcp-dev-ca.pem
+hermes config set mcp_servers.cassandra.ssl_verify ~/.config/cass/cass-mcp-ca.pem
 ```
 
 Keep the single quotes around `Bearer ${CASS_MCP_KEY}`. Hermes fills in the
 variable from `.env` when it connects, so the key itself never goes into
 `config.yaml`.
 
-On sgtstubby itself, the URL can be `https://localhost:8443/mcp`.
+On the Cassandra host itself, the URL can be `https://localhost:8443/mcp`.
 
 ## 5. Test the connection
 
@@ -106,7 +102,7 @@ You should see:
 ```
 ✓ Connected
 ✓ Tools discovered: 1
-    cass_ask   Ask Cassandra, GW RTS's read-only infrastructure eviden...
+    cass_ask   Ask Cassandra, ...
 ```
 
 If you don't, go to [When it doesn't work](#when-it-doesnt-work) before
@@ -124,24 +120,35 @@ than its skills do. Add this entry to `~/.hermes/memories/MEMORY.md`. If the
 file already has entries, put a line containing only `§` before it.
 
 ```
-Cassandra ("cass") is GW RTS's read-only infrastructure evidence service. For any question about RT tickets, Zabbix alerts, Wazuh agents, Pegasus jobs (PegasusDB) or host state, call the MCP tool mcp__cassandra__cass_ask with the user's whole question in plain English. "Ask cass" means call that tool. Report its numbers and ticket IDs exactly as given. Don't ask for RT credentials or endpoints; Cassandra holds them. There is no askcass command on this machine.
+Cassandra ("cass") is our read-only infrastructure evidence service. For any question about RT tickets, Zabbix alerts, Wazuh agents, Pegasus jobs (PegasusDB) or host state, call the MCP tool mcp__cassandra__cass_ask with the user's whole question in plain English. "Ask cass" means call that tool. Report its numbers and ticket IDs exactly as given. Don't ask for RT credentials or endpoints; Cassandra holds them. There is no askcass command on this machine.
 ```
 
-If `askcass` does work on this machine, as it does on sgtstubby, drop the
-last sentence.
+If `askcass` does work on this machine, as it does on the Cassandra host,
+drop the last sentence.
 
-**The two MCP skills.** Copy them in from your checkout:
+**The two MCP skills.** These tell Hermes how to word questions for
+Cassandra and how to report its answers. This downloads just the two skill
+folders from `main` into Hermes's skills folder. The repository is public, so
+no GitHub account or checkout is needed:
 
 ```sh
 mkdir -p ~/.hermes/skills/infrastructure
-cp -R <checkout>/integrations/hermes-skill/cassandra-mcp ~/.hermes/skills/infrastructure/
-cp -R <checkout>/integrations/hermes-skill/rt-ticket-analysis-mcp ~/.hermes/skills/infrastructure/
+curl -fsSL https://github.com/bindatype/cassandra/archive/refs/heads/main.tar.gz |
+  tar -xz -C ~/.hermes/skills/infrastructure --strip-components=3 \
+    cassandra-main/integrations/hermes-skill/cassandra-mcp \
+    cassandra-main/integrations/hermes-skill/rt-ticket-analysis-mcp
+ls ~/.hermes/skills/infrastructure
 ```
 
-Install the `-mcp` skills, not `cassandra` and `rt-ticket-analysis`. Those
-two tell Hermes to run the `askcass` command, which exists only on sgtstubby.
-Copy rather than symlink: Hermes warns about skills that resolve outside
-`~/.hermes/skills`. Copy them again after you pull an update.
+The last line should list `cassandra-mcp` and `rt-ticket-analysis-mcp`. Run
+the command again to pick up an update; it overwrites both folders. Tested
+with the `tar` that ships with macOS and with GNU tar on Linux.
+
+Take only the `-mcp` skills. The repository's plain `cassandra` and
+`rt-ticket-analysis` skills run the `askcass` command, which exists only on
+the Cassandra host. If you do have a checkout, copy the folders rather than
+symlinking them: Hermes warns about skills that resolve outside
+`~/.hermes/skills`.
 
 `hermes skills list` should now show `cassandra-mcp` and
 `rt-ticket-analysis-mcp` as enabled.
@@ -165,9 +172,9 @@ first if you prefer.
 
 ## 8. First question
 
-**Connect the VPN before you start Hermes.** Hermes connects to MCP servers
-once, when a session starts. A session started before the network was ready
-stays without Cassandra until you start a new one.
+**Be on the right network before you start Hermes.** Hermes connects to MCP
+servers once, when a session starts. A session started before the network or
+VPN was ready stays without Cassandra until you start a new one.
 
 Then, in a new session:
 
@@ -185,26 +192,25 @@ Start with `hermes mcp test cassandra`, then look in
 
 | Symptom | Meaning | Fix |
 |---|---|---|
-| `Failed to connect to MCP server 'cassandra': CancelledError`, with no `HTTP Request` line before it | No reply from sgtstubby: you are off campus and off VPN, or the VPN was still coming up | Connect the VPN, then start a new Hermes session |
+| `Failed to connect to MCP server 'cassandra': CancelledError`, with no `HTTP Request` line before it | No reply from the Cassandra host: you are off the site network, or the VPN was still coming up | Connect, then start a new Hermes session |
 | `401` | No key was sent, or MindRouter rejected it | Check the `CASS_MCP_KEY` line in `~/.hermes/.env` and the quoted `Bearer ${CASS_MCP_KEY}` header |
 | `403` | The key is valid but not on Cassandra's allowlist | Step 1. A new MindRouter key needs a new hash |
-| Certificate or SSL error | Hermes doesn't trust the development CA | Step 2, and check the `ssl_verify` path |
+| Certificate or SSL error | Hermes doesn't trust the `cass-mcp` certificate | Step 2, and check the `ssl_verify` path |
 | Connected, but Hermes says it has no access to RT, or asks what "cass" is | The memory entry is missing | Step 6 |
 | `tool_call` errors, or a truncated tool name like `mcp__cassandra__cass_...` | The model is struggling with the lookup step | Step 7 |
-| "Cassandra is answering 4 questions already" or "you already have 2 questions running" | All four question slots are in use, or you already have two questions running | Wait a minute and ask again; questions are refused rather than queued |
-| A Wazuh answer says the API presented a certificate that is "not the pinned one" | The Wazuh manager's certificate changed; Cassandra refuses it rather than trusting it | Nothing to fix on your side: tell Glen, who re-pins it on sgtstubby |
+| "Cassandra is answering 4 questions already" or "you already have 2 questions running" | All question slots are in use, or you already have two questions running | Wait a minute and ask again; questions are refused rather than queued |
+| A Wazuh answer says the API presented a certificate that is "not the pinned one" | The Wazuh manager's certificate changed; Cassandra refuses it rather than trusting it | Nothing to fix on your side: tell your administrator, who re-pins it (`CASS_WAZUH_CERT`) |
 
 ## What Cassandra will and won't tell you
 
 - Read-only, and only what its sources hold. Ticket metadata, never ticket
   contents.
-- RT answers cover the queues Cassandra is configured for: hpchelp, rtshelp,
-  change, redcaphelp, alerts and lustrepurge. Name queues in the question
-  ("in rtshelp and hpchelp") to search only those. "Open" means status new,
-  open or stalled; say "active" to get RT's `Status = '__Active__'`, which
-  follows each queue's own lifecycle. Say which queues and which of the two
-  you mean when comparing with a search in the RT web interface.
-- Answers are internal GW IT data, subject to GW data policy. Cassandra and
-  its model run locally. If you connect an agent whose model runs in the
-  cloud, the answers leave GW, and that is your responsibility. The team
-  standard is Hermes on local models.
+- RT answers cover the queues the deployment allows (`CASS_RT_QUEUES`). Name
+  queues in the question to search only those. "Open" means status new, open
+  or stalled; say "active" to get RT's `Status = '__Active__'`, which follows
+  each queue's own lifecycle. Say which queues and which of the two you mean
+  when comparing with a search in the RT web interface.
+- Answers are internal data, subject to your organisation's data policy.
+  Cassandra and its model are meant to run on your own infrastructure. If
+  you connect an agent whose model runs in the cloud, the answers leave with
+  it, and that is your responsibility.

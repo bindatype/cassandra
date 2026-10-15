@@ -277,9 +277,8 @@ invisible to child processes; this has cost time on three separate occasions.
 **What is the TLS posture?** Verify by default. Where a source's certificate
 cannot verify by name, pin it, as the Wazuh connector does with
 `CASS_WAZUH_CERT`: compare the presented certificate byte for byte and refuse
-any other. Do not skip verification. The Wazuh connector skipped it in every
-deployed path until 2026-10-14, while sending its API password across the
-public internet; a scan found it.
+any other. Do not skip verification: a connector that skips it hands its
+credentials to whatever answers.
 
 **What is the natural bound?** Every intent needs a limit that keeps evidence
 inside the model's context. Do not hard-code what that context is: MindRouter's
