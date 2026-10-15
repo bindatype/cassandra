@@ -10,31 +10,29 @@ Cassandra runs on sgtstubby as the `cass-mcp` service, at
 with every question. Cassandra checks the key against its allowlist, then
 asks MindRouter whether the key is still valid, then answers on your key.
 
-Expect about 15 minutes. Steps 1 and 2 need Glen; the rest you do yourself.
+Expect about 15 minutes. Step 1 needs Glen; the rest you do yourself.
 
 ## What you need
 
 - **Campus network or the VPN.** Port 8443 is not reachable from outside.
-- **Hermes** installed and working with a model.
+- **Hermes** installed and working with a model. Hermes Desktop and the
+  `hermes` command share `~/.hermes`, so the commands below configure the
+  desktop app too; restart it after step 6.
 - **Your own MindRouter API key.** Never use someone else's: Cassandra records
   every question under the name your key maps to.
-- **A checkout of this repository on the `glendev` branch**, for the skills
-  in step 6.
+- **A checkout of this repository** (`main`), for the skills in step 6.
 
 ## 1. Get your key onto the allowlist
 
 Compute your key's hash. Only the hash is shared; the key never leaves your
-machine. On Linux:
+machine. Paste the key at the silent prompt, so it stays out of your shell
+history, and keep the terminal open for step 3. On macOS:
 
 ```sh
-printf '%s' "$YOUR_MINDROUTER_KEY" | sha256sum
+read -rs KEY && printf '%s' "$KEY" | shasum -a 256
 ```
 
-On macOS:
-
-```sh
-printf '%s' "$YOUR_MINDROUTER_KEY" | shasum -a 256
-```
+On Linux, use `sha256sum` in place of `shasum -a 256`.
 
 Send Glen the 64-character hex string, and the name you want to appear in
 the audit log. He adds a line `sha256:<hash> <name>` to the allowlist, which
@@ -44,23 +42,43 @@ takes effect without a restart.
 machine with a Go toolchain, `go run ./cmd/cass-mcp -hash` from the checkout
 reads the key on stdin and prints the finished line.
 
-## 2. Get the certificate authority file
+## 2. Save the certificate authority file
 
 Until the university certificate is in place, `cass-mcp` uses a development
 certificate signed by a small private CA, "Cassandra MCP development CA",
-valid to October 2027. Get `ca.pem` from Glen. It is a public certificate,
-not a secret. Save it as `~/.config/cass/cass-mcp-dev-ca.pem`
-(`mkdir -p ~/.config/cass` first if that folder doesn't exist).
+valid to 2 October 2027. It is a public certificate, not a secret:
 
-Never turn certificate verification off to get past this step.
+```sh
+mkdir -p ~/.config/cass
+cat > ~/.config/cass/cass-mcp-dev-ca.pem <<'EOF'
+-----BEGIN CERTIFICATE-----
+MIIBtjCCAVygAwIBAgIURRcSWgjjSgUjoBdmfl5iJblY5aowCgYIKoZIzj0EAwIw
+JzElMCMGA1UEAwwcQ2Fzc2FuZHJhIE1DUCBkZXZlbG9wbWVudCBDQTAeFw0yNjEw
+MDIxNTE1MDdaFw0yNzEwMDIxNTE1MDdaMCcxJTAjBgNVBAMMHENhc3NhbmRyYSBN
+Q1AgZGV2ZWxvcG1lbnQgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATUusfe
+yVMDmAa6hSFo6cfoGf3MBcrll1n3yk1eW1AWi8bOEAZKym7LGDJmVk+cfKEHWaUm
+pG6aoi7bmJrkvvzRo2YwZDAdBgNVHQ4EFgQUmW4PNKixlL0KFatO/RVj/I++bVQw
+HwYDVR0jBBgwFoAUmW4PNKixlL0KFatO/RVj/I++bVQwEgYDVR0TAQH/BAgwBgEB
+/wIBADAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDSAAwRQIgNCExtTfrrYBa
+hyk+v7Gc7OdAYXPwyNjS/wrb3V8/JxECIQCCwI3wUo/QroAtxh2RYHmqIhwcTMI/
+HdJOuMzyJesChQ==
+-----END CERTIFICATE-----
+EOF
+openssl x509 -in ~/.config/cass/cass-mcp-dev-ca.pem -noout -fingerprint -sha256
+```
+
+The last line must print
+`86:C7:2F:09:74:A9:48:AC:15:94:B4:63:46:48:33:8F:51:77:92:4A:10:EF:45:0B:09:DA:F3:8D:6F:55:CB:5F`.
+If it doesn't, the copy is damaged; stop. Never turn certificate
+verification off to get past this step.
 
 ## 3. Put the key where Hermes can read it
 
-Add a line to `~/.hermes/.env`. Write it as `KEY=value`, with no `export`:
+Add a line to `~/.hermes/.env`, written as `KEY=value` with no `export`. In
+the terminal from step 1, where `$KEY` is still set:
 
 ```sh
-echo 'CASS_MCP_KEY=<your MindRouter key>' >> ~/.hermes/.env
-chmod 600 ~/.hermes/.env
+printf 'CASS_MCP_KEY=%s\n' "$KEY" >> ~/.hermes/.env && chmod 600 ~/.hermes/.env && unset KEY
 ```
 
 ## 4. Configure the server
@@ -174,7 +192,7 @@ Start with `hermes mcp test cassandra`, then look in
 | Connected, but Hermes says it has no access to RT, or asks what "cass" is | The memory entry is missing | Step 6 |
 | `tool_call` errors, or a truncated tool name like `mcp__cassandra__cass_...` | The model is struggling with the lookup step | Step 7 |
 | "Cassandra is answering 4 questions already" or "you already have 2 questions running" | All four question slots are in use, or you already have two questions running | Wait a minute and ask again; questions are refused rather than queued |
-| Wazuh questions fail | Wazuh is not yet available through `cass-mcp` (a certificate decision is pending) | Use `askcass` on sgtstubby for Wazuh for now |
+| A Wazuh answer says the API presented a certificate that is "not the pinned one" | The Wazuh manager's certificate changed; Cassandra refuses it rather than trusting it | Nothing to fix on your side: tell Glen, who re-pins it on sgtstubby |
 
 ## What Cassandra will and won't tell you
 
