@@ -2,7 +2,7 @@ GO ?= go
 DIST ?= dist
 BINARY ?= cassd
 
-.PHONY: help install uninstall install-cass-mcp rollback-cass-mcp test verify check-entrypoints test-rt-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
+.PHONY: help install uninstall install-cass-mcp rollback-cass-mcp test verify check-entrypoints test-rt-live test-export-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
 
 # Default target: say what exists. A bare `make` that silently builds one
 # thing tells a newcomer nothing about the other fifteen.
@@ -13,6 +13,7 @@ help:
 	@echo '  make verify            everything that must pass before main; no credentials'
 	@echo '  make check-entrypoints check install, uninstall, and askcass startup'
 	@echo '  make test-rt-live      RT invariants against live data (needs RT credentials)'
+	@echo '  make test-export-live  export the incident window from the live view and verify it (needs the view)'
 	@echo '  make eval-rt-shape     does the model bound a ticket-age question (needs credentials)'
 	@echo '  make fmt               gofmt the tree'
 	@echo ''
@@ -100,6 +101,12 @@ check-entrypoints:
 # is a question about the model, and needs repetition rather than assertion.
 test-rt-live:
 	$(GO) test -tags rtlive -count=1 -v ./internal/connector/ -run TestRTLive
+
+# The export tool against the live runTBL2_jobs view: the 2026-10-07 incident
+# request end to end, read-only, into a temporary directory. Needs the view on
+# lucee and CASS_PEGASUS_DSN (source ~/.config/cass/env).
+test-export-live:
+	$(GO) test -tags integration -count=1 -v -timeout 30m ./internal/export/ -run TestLive
 
 # Whether the model proposes the right SHAPE for a ticket-age question, read
 # from the trace rather than graded out of prose. Five phrasings that must

@@ -1,0 +1,65 @@
+{
+  "version": "2026-10-07.1",
+  "source": {
+    "database": "pegasusdb",
+    "relation": "runTBL2_jobs",
+    "time_column": "SubmitTime",
+    "definition": "configs/pegasusdb/runTBL2_jobs.sql"
+  },
+  "null_marker": "\\N",
+  "assumptions": [
+    {
+      "name": "mem_scope_job_total",
+      "fields": ["req_mem_bytes"],
+      "statement": "TRESReq_mem is the job's total requested memory, not per node or per CPU. Slurm's convention for ReqTRES; not checked against this cluster's configuration. Adopted by Glen, 2026-10-07."
+    },
+    {
+      "name": "mem_units_binary",
+      "fields": ["req_mem_bytes"],
+      "statement": "The suffixes M, G and T are powers of 1024: 2^20, 2^30 and 2^40 bytes. Slurm's convention; not checked against this cluster's configuration. Adopted by Glen, 2026-10-07."
+    }
+  ],
+  "flags": {
+    "tres_unrecorded": "TRES request fields were not recorded for this job (TRESReq_mem empty or null; every job before 22 January 2026). GPU, node and memory requests are unknown, not zero.",
+    "mem_missing": "TRESReq_mem is empty or null.",
+    "mem_special": "TRESReq_mem is zero, Slurm's request for all of a node's memory. Kept raw; no byte value is derived.",
+    "mem_invalid": "TRESReq_mem is not a number followed by M, G or T.",
+    "mem_scope_assumed_job_total": "req_mem_bytes rests on the assumptions mem_scope_job_total and mem_units_binary.",
+    "walltime_unlimited": "TimelimitRaw is UNLIMITED.",
+    "walltime_partition_default": "TimelimitRaw is Partition: the partition's default limit applied, and its value is not recorded.",
+    "walltime_missing": "TimelimitRaw is empty or null.",
+    "walltime_invalid": "TimelimitRaw is not a whole number of minutes, UNLIMITED or Partition.",
+    "jobid_malformed": "JobID is neither a plain number nor <parent>_<index>.",
+    "netid_missing": "netid is empty or null.",
+    "partition_missing": "partition is empty or null.",
+    "partition_unresolved": "partition contains '_': an unstarted multi-partition request recorded as the list it asked for.",
+    "cpu_tres_mismatch": "ReqCPUS differs from TRESReq_cpu.",
+    "cpus_missing": "ReqCPUS is null.",
+    "nodes_missing": "TRES was recorded but TRESReq_node is empty or null.",
+    "nodes_invalid": "TRESReq_node is not a whole number.",
+    "gpus_invalid": "TRESReq_gres_gpu is not a whole number."
+  },
+  "fields": [
+    {"name": "job_id", "status": "recorded", "sources": ["JobID"], "rule": "Verbatim."},
+    {"name": "array_parent_id", "status": "derived", "sources": ["JobID"], "rule": "The digits before '_' when JobID is <parent>_<index>; null for a plain JobID; null with jobid_malformed otherwise."},
+    {"name": "array_task_index", "status": "derived", "sources": ["JobID"], "rule": "The digits after '_' when JobID is <parent>_<index>; null for a plain JobID; null with jobid_malformed otherwise."},
+    {"name": "researcher_key", "status": "derived", "sources": ["netid"], "rule": "Pseudonymous identity: 'r_' and the first 16 hex characters of HMAC-SHA256(salt, netid), stable across exports while the salt is unchanged. With identity 'netid' (caller needs the identify permission), the netid verbatim. Null with netid_missing when netid is empty or null."},
+    {"name": "account", "status": "recorded", "sources": ["groupName"], "rule": "Verbatim. The Unix group of the submitting account, which is not necessarily a Slurm account."},
+    {"name": "submit_epoch", "status": "recorded", "sources": ["SubmitTime"], "unit": "seconds since 1970-01-01 UTC", "rule": "Verbatim."},
+    {"name": "submit_local", "status": "derived", "sources": ["SubmitTime"], "rule": "RFC 3339 with offset, in the request's time zone, computed by the exporter (not the database)."},
+    {"name": "submit_month", "status": "derived", "sources": ["SubmitTime"], "rule": "YYYY-MM in the request's time zone, computed by the exporter."},
+    {"name": "partition_raw", "status": "recorded", "sources": ["partition"], "rule": "Verbatim, including multi-partition values. partition_unresolved when it contains '_'; partition_missing when empty or null."},
+    {"name": "state", "status": "recorded", "sources": ["State"], "rule": "Verbatim. Never used to select rows: every job submitted in the window is exported."},
+    {"name": "req_cpus", "status": "recorded", "sources": ["ReqCPUS", "TRESReq_cpu"], "unit": "logical CPUs", "rule": "ReqCPUS verbatim. cpu_tres_mismatch when TRESReq_cpu is present and differs; cpus_missing when ReqCPUS is null."},
+    {"name": "req_nodes", "status": "recorded", "sources": ["TRESReq_node", "TRESReq_mem"], "unit": "nodes", "rule": "TRESReq_node as a whole number. Never NNodes, which is nodes allocated. Null with tres_unrecorded when TRES was not recorded; null with nodes_missing or nodes_invalid otherwise."},
+    {"name": "req_gpus", "status": "recorded", "sources": ["TRESReq_gres_gpu", "TRESReq_mem"], "unit": "GPUs", "rule": "TRESReq_gres_gpu as a whole number. 0 only when TRES was recorded and TRESReq_gres_gpu is empty or null. Null with tres_unrecorded when TRES was not recorded; null with gpus_invalid when not a whole number."},
+    {"name": "req_mem_raw", "status": "recorded", "sources": ["TRESReq_mem"], "rule": "Verbatim."},
+    {"name": "req_mem_bytes", "status": "derived", "sources": ["TRESReq_mem"], "unit": "bytes", "assumptions": ["mem_scope_job_total", "mem_units_binary"], "rule": "Number times 2^20 (M), 2^30 (G) or 2^40 (T), rounded to the nearest byte, with mem_scope_assumed_job_total. Null with mem_missing, mem_special (zero) or mem_invalid otherwise."},
+    {"name": "req_walltime_raw", "status": "recorded", "sources": ["TimelimitRaw"], "rule": "Verbatim."},
+    {"name": "req_walltime_s", "status": "derived", "sources": ["TimelimitRaw"], "unit": "seconds", "rule": "Whole minutes times 60. Null with walltime_unlimited, walltime_partition_default, walltime_missing or walltime_invalid otherwise; the four stay distinct."},
+    {"name": "quality_flags", "status": "derived", "sources": [], "rule": "Every flag that applies to the row's delivered fields, sorted and joined with ';'; empty when none apply."},
+    {"name": "req_gpu_type", "status": "not_recorded", "sources": [], "reason": "TRESReq_gres_gpu holds a GPU count only; no column records the requested GPU model."},
+    {"name": "req_mem_scope_requested", "status": "not_recorded", "sources": [], "reason": "Whether memory was requested per node (--mem) or per CPU (--mem-per-cpu) is not stored; TRESReq_mem holds one value. See the assumption mem_scope_job_total."},
+    {"name": "req_nodes_range", "status": "not_recorded", "sources": [], "reason": "TRESReq_node holds a single count; a requested range such as 2-4 is not stored."}
+  ]
+}

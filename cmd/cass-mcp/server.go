@@ -49,6 +49,7 @@ type Server struct {
 	maxInflight int
 	maxPerUser  int
 	log         io.Writer
+	exports     *ExportService // nil when exports are not configured
 
 	mu        sync.Mutex
 	inflight  int
@@ -80,7 +81,8 @@ type session struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/mcp" {
+	isExport := strings.HasPrefix(r.URL.Path, "/exports/") && s.exports != nil
+	if r.URL.Path != "/mcp" && !isExport {
 		http.NotFound(w, r)
 		return
 	}
@@ -89,6 +91,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="cassandra"`)
 		http.Error(w, reason, status)
 		fmt.Fprintf(s.log, "%s refused %d %s\n", time.Now().UTC().Format(time.RFC3339), status, reason)
+		return
+	}
+	if isExport {
+		s.exports.ServeFile(w, r, caller)
 		return
 	}
 	switch r.Method {
@@ -199,9 +205,13 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request, caller Caller
 	case "ping":
 		writeRPC(w, req.ID, map[string]any{}, nil)
 	case "tools/list":
-		writeRPC(w, req.ID, map[string]any{"tools": []any{askTool()}}, nil)
+		tools := []any{askTool()}
+		if s.exports != nil {
+			tools = append(tools, exportTools(s.exports.Definitions)...)
+		}
+		writeRPC(w, req.ID, map[string]any{"tools": tools}, nil)
 	case "tools/call":
-		writeRPC(w, req.ID, s.callTool(r.Context(), caller, req.Params), nil)
+		writeRPC(w, req.ID, s.dispatchTool(r, caller, req.Params), nil)
 	default:
 		writeRPC(w, req.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method})
 	}
@@ -222,6 +232,25 @@ func (s *Server) touchSession(id string) string {
 	sess.seen = time.Now()
 	s.sessions[id] = sess
 	return sess.client
+}
+
+// dispatchTool routes a tools/call to the question tool or, when exports are
+// configured, to the export tools.
+func (s *Server) dispatchTool(r *http.Request, caller Caller, raw json.RawMessage) map[string]any {
+	var params struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	json.Unmarshal(raw, &params)
+	if s.exports != nil {
+		switch params.Name {
+		case exportToolName:
+			return s.exports.Start(caller, params.Arguments)
+		case statusToolName:
+			return s.exports.Status(caller, params.Arguments, r.Host)
+		}
+	}
+	return s.callTool(r.Context(), caller, raw)
 }
 
 func (s *Server) callTool(ctx context.Context, caller Caller, raw json.RawMessage) map[string]any {

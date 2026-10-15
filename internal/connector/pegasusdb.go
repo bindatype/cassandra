@@ -222,6 +222,14 @@ const workloadReporting = "before answering, also give: for a window that spans 
 	"window were excluded or unclassified, naming the unclassified partitions. Run one more query for these if " +
 	"this result does not already show them"
 
+// memoryNote goes with any result that touches a memory column. Before 22
+// January 2026 both columns are null, so a total over a window that starts
+// earlier silently covers part of it.
+const memoryNote = "TRESReq_mem and TRESalloc_mem hold a size with a unit suffix (M, G or T) and are recorded " +
+	"only from 22 January 2026; earlier rows are null. Give memory totals in GB; if the window starts before " +
+	"22 January 2026, say that memory covers only the part from then on; and say how many jobs in the window " +
+	"had no memory value"
+
 // accountingNotes are what an accounting answer needs and the rows cannot
 // show: which definition produced a workload count, and that a past window's
 // totals are a snapshot. Jobs submitted in a window keep arriving until they
@@ -231,6 +239,9 @@ func accountingNotes(query string, requestedAt time.Time) []string {
 	var notes []string
 	if strings.Contains(lower, "runtbl2_workload") {
 		notes = append(notes, workloadDefinition, workloadReporting)
+	}
+	if strings.Contains(lower, "tresreq_mem") || strings.Contains(lower, "tresalloc_mem") {
+		notes = append(notes, memoryNote)
 	}
 	if strings.Contains(lower, "runtbl2") {
 		notes = append(notes, "as of "+requestedAt.Format(time.RFC3339)+": totals for a past window can still "+

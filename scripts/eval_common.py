@@ -68,12 +68,20 @@ def default_model():
             return value
     return FALLBACK_MODEL
 
-# The Wazuh manager presents a self-signed certificate; see the Wazuh
-# Interaction Guide. Verification is disabled only for these ground-truth
-# probes, which is the same posture the connector requires an explicit flag for.
-_CTX = ssl.create_default_context()
-_CTX.check_hostname = False
-_CTX.verify_mode = ssl.CERT_NONE
+# Zabbix and RT present certificates that verify normally, so their probes use
+# the default context. The Wazuh manager does not: it serves Wazuh's factory
+# certificate (self-signed, CN wazuh.com), reached over the public internet.
+# Its probes trust only the pinned copy named by CASS_WAZUH_CERT -- the same pin
+# cass-chat uses -- with hostname checking off because that certificate names
+# no host we connect to. Verification was previously disabled for all three.
+def _wazuh_ctx():
+    path = env_value("CASS_WAZUH_CERT")
+    if not path:
+        sys.exit("CASS_WAZUH_CERT is not set: Wazuh ground truth is only read "
+                 "against the pinned certificate")
+    ctx = ssl.create_default_context(cafile=path)
+    ctx.check_hostname = False
+    return ctx
 
 # What each source needs, and what its absence does to a run.
 #
@@ -145,7 +153,7 @@ def zabbix_count(host=None):
         os.environ["CASS_ZABBIX_ENDPOINT"], data=body, method="POST",
         headers={"Content-Type": "application/json-rpc",
                  "Authorization": "Bearer " + os.environ["ZABBIX_RO_TOKEN"]})
-    return int(json.load(urllib.request.urlopen(req, context=_CTX, timeout=30))["result"])
+    return int(json.load(urllib.request.urlopen(req, timeout=30))["result"])
 
 
 def wazuh_agent_counts():
@@ -155,10 +163,11 @@ def wazuh_agent_counts():
     req = urllib.request.Request(base + "/security/user/authenticate?raw=true",
                                  method="POST",
                                  headers={"Authorization": "Basic " + cred})
-    token = urllib.request.urlopen(req, context=_CTX, timeout=30).read().decode().strip()
+    ctx = _wazuh_ctx()
+    token = urllib.request.urlopen(req, context=ctx, timeout=30).read().decode().strip()
     req = urllib.request.Request(base + "/agents/summary/status",
                                  headers={"Authorization": "Bearer " + token})
-    data = json.load(urllib.request.urlopen(req, context=_CTX, timeout=30))
+    data = json.load(urllib.request.urlopen(req, context=ctx, timeout=30))
     conn = data["data"]["connection"]
     return conn["active"], conn["disconnected"]
 
@@ -217,8 +226,7 @@ def run_chat(binary, model, question, policy=DEFAULT_POLICY, timeout=420):
     started = time.time()
     try:
         proc = subprocess.run(
-            [binary, "-policy", policy, "-model", model, "-trace",
-             "-wazuh-insecure", question],
+            [binary, "-policy", policy, "-model", model, "-trace", question],
             capture_output=True, text=True, timeout=timeout)
         answer, trace = proc.stdout.strip(), proc.stderr
     except subprocess.TimeoutExpired:

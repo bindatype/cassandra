@@ -202,7 +202,7 @@ func TestHalfConfiguredSourceIsRefused(t *testing.T) {
 	t.Setenv(rtTokenEnv, "")
 
 	_, err := buildSession("../../configs/broker-policy.example.json", "m", "http://localhost:8000",
-		"", "", "https://rt.example.edu", false, false)
+		"", "", "https://rt.example.edu", "", false, false)
 	if err == nil {
 		t.Fatal("an RT endpoint with no token must be refused, not silently skipped")
 	}
@@ -246,7 +246,7 @@ func TestEndpointAgentConfigurationOffersLiveEvidence(t *testing.T) {
 		}
 	}`)
 
-	session, err := buildSession(examplePolicy(t), "test-model", "http://localhost:8000", "", "", "", false, false)
+	session, err := buildSession(examplePolicy(t), "test-model", "http://localhost:8000", "", "", "", "", false, false)
 	if err != nil {
 		t.Fatalf("buildSession() error = %v", err)
 	}

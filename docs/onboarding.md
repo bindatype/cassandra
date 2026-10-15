@@ -116,6 +116,7 @@ export WAZUH_API_PASSWORD=...
 # Agents in these groups are escalated when they go down. Without it the
 # check does not run, and the evidence says so rather than reporting zero.
 export CASS_WAZUH_CRITICAL_GROUPS=RTS_Ops,Viper
+export CASS_WAZUH_CERT=$HOME/.config/cass/wazuh-api.pem   # pinned API certificate; see README
 
 # Scheduler accounting. Needed by eval-pegasus and the morning digest.
 export CASS_PEGASUS_DSN='readonly:PASSWORD@tcp(db.example.edu:3306)/pegasusdb?timeout=10s&readTimeout=30s&parseTime=false'

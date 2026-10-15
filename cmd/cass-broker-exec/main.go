@@ -22,6 +22,7 @@ const (
 	wazuhEndpointEnv   = "CASS_WAZUH_ENDPOINT"
 	wazuhUsernameEnv   = "WAZUH_API_USERNAME"
 	wazuhPasswordEnv   = "WAZUH_API_PASSWORD"
+	wazuhCertEnv       = "CASS_WAZUH_CERT"
 	pegasusDSNEnv      = "CASS_PEGASUS_DSN"
 	pegasusMaxRowsEnv  = "CASS_PEGASUS_MAX_ROWS"
 	pegasusTimeoutEnv  = "CASS_PEGASUS_TIMEOUT"
@@ -50,7 +51,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	policyPath := flags.String("policy", "", "broker policy the plan is verified against (required)")
 	zabbixEndpoint := flags.String("zabbix-endpoint", env.Get(zabbixEndpointEnv), "Zabbix JSON-RPC endpoint URL")
 	wazuhEndpoint := flags.String("wazuh-endpoint", env.Get(wazuhEndpointEnv), "Wazuh API base URL")
-	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API (required where the manager presents a self-signed certificate)")
+	wazuhInsecure := flags.Bool("wazuh-insecure", false, "skip TLS verification for the Wazuh API (prefer -wazuh-cert)")
+	wazuhCert := flags.String("wazuh-cert", env.Get(wazuhCertEnv), "PEM file of the Wazuh API certificate to pin; any other certificate is refused")
 	rtEndpoint := flags.String("rt-endpoint", env.Get(rtEndpointEnv), "Request Tracker REST 2.0 base URL")
 	timeout := flags.Duration("timeout", 20*time.Second, "overall execution timeout")
 	if err := flags.Parse(args); err != nil {
@@ -85,6 +87,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		zabbixEndpoint: *zabbixEndpoint,
 		wazuhEndpoint:  *wazuhEndpoint,
 		wazuhInsecure:  *wazuhInsecure,
+		wazuhCert:      *wazuhCert,
 		rtEndpoint:     *rtEndpoint,
 	})
 	if err != nil {
@@ -166,6 +169,7 @@ type connectorOptions struct {
 	zabbixEndpoint string
 	wazuhEndpoint  string
 	wazuhInsecure  bool
+	wazuhCert      string
 	rtEndpoint     string
 }
 
@@ -205,12 +209,20 @@ func buildConnectors(plan broker.RoutePlan, options connectorOptions) ([]connect
 		if username == "" || password == "" {
 			return nil, fmt.Errorf("plan needs Wazuh: %s and %s must both be set and exported", wazuhUsernameEnv, wazuhPasswordEnv)
 		}
+		var pinned []byte
+		if options.wazuhCert != "" {
+			var err error
+			if pinned, err = os.ReadFile(options.wazuhCert); err != nil {
+				return nil, fmt.Errorf("read %s (%s): %w", wazuhCertEnv, options.wazuhCert, err)
+			}
+		}
 		wazuh, err := connector.NewWazuhConnector(connector.WazuhConfig{
-			Endpoint:           options.wazuhEndpoint,
-			Username:           username,
-			Password:           password,
-			InsecureSkipVerify: options.wazuhInsecure,
-			CriticalGroups:     splitList(env.Get(wazuhCriticalGroupsEnv)),
+			Endpoint:             options.wazuhEndpoint,
+			Username:             username,
+			Password:             password,
+			InsecureSkipVerify:   options.wazuhInsecure,
+			PinnedCertificatePEM: pinned,
+			CriticalGroups:       splitList(env.Get(wazuhCriticalGroupsEnv)),
 		})
 		if err != nil {
 			return nil, err

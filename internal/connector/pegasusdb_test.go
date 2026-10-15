@@ -262,6 +262,21 @@ func TestAccountingNotesStateTheDefinitionAndTheTime(t *testing.T) {
 	}
 }
 
+// A memory total needs its unit and its coverage: both columns are null before
+// 22 January 2026.
+func TestAccountingNotesCoverMemoryColumns(t *testing.T) {
+	at := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	notes := accountingNotes("SELECT TRESalloc_mem, COUNT(*) FROM runTBL2 WHERE SubmitTime > 0 GROUP BY TRESalloc_mem", at)
+	if len(notes) != 2 || notes[0] != memoryNote || !strings.Contains(notes[1], "as of") {
+		t.Errorf("memory query notes = %q, want the memory note and the as-of time", notes)
+	}
+	for _, want := range []string{"22 January 2026", "GB", "no memory value"} {
+		if !strings.Contains(memoryNote, want) {
+			t.Errorf("the memory note lacks %q", want)
+		}
+	}
+}
+
 // The definition note restates the view. If the view's rules change and the
 // note does not, answers would describe a definition that is no longer applied.
 func TestWorkloadDefinitionMatchesTheView(t *testing.T) {

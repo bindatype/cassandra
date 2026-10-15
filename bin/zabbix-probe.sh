@@ -62,7 +62,7 @@ BIN=${CASS_BIN:-${SROIAAA_BIN:-"$ROOT/runtime"}}
 # repository root, and it recompiled for each of the nine cases when it worked.
 mkdir -p "$BIN"
 (cd "$ROOT" && go build -o "$BIN/cass-chat" ./cmd/cass-chat)
-CHAT="$BIN/cass-chat -policy $POLICY -wazuh-insecure"
+CHAT="$BIN/cass-chat -policy $POLICY"
 
 filter="${1:-}"
 echo "$cases" | while IFS='|' read -r id question good bad; do

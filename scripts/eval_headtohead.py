@@ -40,7 +40,7 @@ def ask(binary, model, question):
     try:
         proc = subprocess.run(
             [binary, "-policy", config_path("policy.json"),
-             "-wazuh-insecure", "-model", model, question],
+             "-model", model, question],
             capture_output=True, text=True, timeout=420)
         answer = proc.stdout.strip()
     except subprocess.TimeoutExpired:

@@ -268,7 +268,36 @@ Rules for `database.query`:
 <!-- /rule -->
 
 <!-- rule:runtbl2-columns -->
-`SubmitTime`, `StartTime`, and `EndTime` are Unix integers. Other columns include `netid`, `groupName`, `JobID`, `NodeList`, `NNodes`, `ReqCPUS`, `NCPUS`, `State`, `DerivedExitCode`, and `partition`. The nodes a job ran on are in `NodeList`; there is no `Hostname` column.
+These are every column of `runTBL2`; `runTBL2_workload` has the same columns plus `workload`. The nodes a job ran on are in `NodeList`; there is no `Hostname` column, and there is no `RunTime`, `WaitTime` or `Timelimit` column.
+
+Columns marked *text* hold numbers stored as strings. `MAX`, `ORDER BY`, `<` and `>` on them compare characters, not values: over the first week of September 2026, `MAX(TimelimitRaw)` returned 960 while the longest limit was 20160. Write `CAST(col AS UNSIGNED)` before comparing, sorting or aggregating one.
+
+| Column | Meaning |
+| --- | --- |
+| `SubmitTime` | Unix epoch seconds when the job was submitted. Never null. |
+| `StartTime` | Unix epoch seconds when the job started. A job that never started has 0 or null, so `StartTime > 0` selects started jobs. |
+| `EndTime` | Unix epoch seconds when the job ended. |
+| `netid` | Username of the account that submitted the job. |
+| `groupName` | Group of the account that submitted the job. |
+| `JobID` | The job's ID from the Slurm scheduler. |
+| `NodeList` | Comma-separated nodes allocated to the job, fully expanded. |
+| `NNodes` | Number of nodes allocated. |
+| `ReqCPUS` | Number of CPUs (cores) requested. |
+| `NCPUS` | Number of CPUs (cores) allocated. |
+| `CPUTimeRAW` | Core-seconds: `NCPUS * (EndTime - StartTime)`. |
+| `TimelimitRaw` | *text*. The job's time limit in minutes; not how long it ran. `UNLIMITED` and `Partition` (the partition's default) also occur, and `CAST` turns both into 0. |
+| `State` | The job's outcome, and the only column for success or failure: `COMPLETED`, `FAILED`, `TIMEOUT`, `OUT_OF_MEMORY`, `NODE_FAIL`, `CANCELLED`, `CANCELLED by <uid>`. |
+| `DerivedExitCode` | A Slurm `exit:signal` string such as `0:0`. Never a test of success. |
+| `Priority` | *text*. A unitless number Slurm assigns, 0 to 4,294,967,295; higher is further up the scheduling queue. |
+| `partition` | The Slurm partition. A reserved word: always write `` `partition` ``. |
+| `JobName` | The name the user gave the job. Free text, not a category. |
+| `TRESReq_gres_gpu`, `TRESalloc_gres_gpu` | *text*. GPUs requested and allocated; `''` means none. Empty for every job before 8 February 2026. From 9 May 2026 a non-empty `TRESReq_gres_gpu` is what makes a job a GPU job. |
+| `TRESReq_cpu`, `TRESalloc_cpu` | *text*. CPUs requested and allocated. |
+| `TRESReq_node`, `TRESalloc_node` | *text*. Nodes requested and allocated. |
+| `TRESReq_mem`, `TRESalloc_mem` | Memory requested and allocated, with a unit suffix (`512M`, `16G`, `1T`) or none. Not a number; convert the unit before adding or comparing. |
+| `TRESReq_gres_cpu`, `TRESalloc_gres_cpu` | Always empty. Do not use. |
+| `TRESReq_billing`, `TRESalloc_billing`, `TRESReq_energy`, `TRESalloc_energy` | Meaning and units not established. Do not report them. |
+| `workload` | `runTBL2_workload` only: `gpu`, `cpu`, `excluded` or `unclassified`. See the workload rule below. |
 <!-- /rule -->
 
 ### Matching a node in `NodeList`
@@ -286,6 +315,7 @@ Rules for `database.query`:
 - `FY2026` is the most recent fiscal-year table and ends on 2026-07-13.
 - There is no fiscal-year table after `FY2026`.
 - `nodemetrics` stopped in 2022.
+- `jobs2VIEW` adds `RunTime`, `WaitTime`, `Timelimit`, `longGroupName` and `schoolName` to the job columns, but leaves out every job whose group is not in `groupTBL`: 745 of 19,385 jobs in the first week of September 2026, all in `MG-` groups. Use it only for a question about schools or long group names, and say that it misses those jobs. Derive run and wait times from `runTBL2` instead.
 - Querying a table outside its coverage may return zero rows. That does not mean nothing happened.
 
 Schema discovery is allowed within `database.query`. Look up the schema **before** naming a column this prompt does not list, not after the database rejects your guess. A guessed column costs a turn and an error; a lookup costs a turn and gives you every column. If a needed table or column is undocumented here, check before concluding it does not exist.
@@ -324,9 +354,8 @@ WHERE table_schema='pegasusdb'
 
 ### Time
 
-- `SubmitTime`, `StartTime`, and `EndTime` are Unix integers.
 <!-- rule:unix-timestamp -->
-- Every comparison against them must also be a Unix integer.
+- Every comparison against `SubmitTime`, `StartTime` or `EndTime` must also be a Unix integer.
 - Use `UNIX_TIMESTAMP(...)` for time literals and relative windows.
 - Do not compare Unix-integer columns to datetime expressions directly. That can return zero rows without error.
 - Bucket by day with `DATE(FROM_UNIXTIME(SubmitTime))`.
@@ -339,11 +368,11 @@ WHERE table_schema='pegasusdb'
 ### Units
 
 <!-- rule:seconds-hours -->
-- `WaitTime` and `RunTime` are in seconds.
+- Wait and run times are in seconds, whether derived or read from a `WaitTime` or `RunTime` column.
 - Divide by `3600` for hours.
 <!-- rule:timelimit-minutes -->
-- `Timelimit` is in minutes.
-- Multiply `Timelimit` by `60` before comparing it to runtime.
+- A time limit is in minutes: `TimelimitRaw` in `runTBL2`, `Timelimit` in `jobs2VIEW` and the FY tables.
+- Convert it before comparing it to a run time: `CAST(TimelimitRaw AS UNSIGNED) * 60`.
 
 ### Derived timing
 
@@ -351,7 +380,7 @@ WHERE table_schema='pegasusdb'
 - In `runTBL2`, derive wait time as `StartTime - SubmitTime`.
 - In `runTBL2`, derive run time as `EndTime - StartTime`.
 - The FY tables may include `WaitTime`, `RunTime`, and `Timelimit`.
-- If those columns are absent in `runTBL2`, derive them. Do not claim the measurement is unavailable just because it is not precomputed.
+- If those columns are absent, derive them. Do not claim the measurement is unavailable just because it is not precomputed.
 
 ### What counts as a failure
 

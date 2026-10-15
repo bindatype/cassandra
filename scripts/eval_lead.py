@@ -37,7 +37,7 @@ the thing being measured:
                  and this run is excluded from the lead rate rather than
                  counted as a failure of sentence order
 """
-import datetime, json, os, ssl, subprocess, sys, time, urllib.request
+import datetime, json, os, subprocess, sys, time, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from eval_common import (config_path, build_chat, default_model, first_sentence, normalize,
@@ -49,10 +49,6 @@ RUNS = int(os.environ.get("RUNS", "10"))
 DEFAULT_MODEL = default_model()
 
 RULE_ANCHOR = '**Lead with the broken thing, not with the true "no".**'
-
-_CTX = ssl.create_default_context()
-_CTX.check_hostname = False
-_CTX.verify_mode = ssl.CERT_NONE
 
 QUESTIONS = [
     "Did any host lose its Zabbix agent since 5am today?",
@@ -73,7 +69,7 @@ def zabbix(method, params):
         os.environ["CASS_ZABBIX_ENDPOINT"], data=body, method="POST",
         headers={"Content-Type": "application/json-rpc",
                  "Authorization": "Bearer " + os.environ["ZABBIX_RO_TOKEN"]})
-    return json.load(urllib.request.urlopen(req, context=_CTX, timeout=60))["result"]
+    return json.load(urllib.request.urlopen(req, timeout=60))["result"]
 
 
 def agents_down():
@@ -117,7 +113,7 @@ def ask(binary, model, prompt_path, question):
     started = time.time()
     try:
         proc = subprocess.run(
-            [binary, "-policy", policy_path(), "-wazuh-insecure", "-model", model, question],
+            [binary, "-policy", policy_path(), "-model", model, question],
             capture_output=True, text=True, timeout=420, env=env, cwd=ROOT)
     except subprocess.TimeoutExpired:
         return "", round(time.time() - started, 1)

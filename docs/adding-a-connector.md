@@ -274,10 +274,12 @@ as with `rts_wazuh_api_ro`. Store it in `~/.config/cass/env`, mode `0600`,
 with an explicit `export`. A value set in `~/.bashrc` but not exported is
 invisible to child processes; this has cost time on three separate occasions.
 
-**What is the TLS posture?** The Wazuh manager presents a self-signed
-certificate, so its connector requires an explicit `-wazuh-insecure` opt-in
-that warns rather than defaulting to trust. Never make skipping verification
-the default.
+**What is the TLS posture?** Verify by default. Where a source's certificate
+cannot verify by name, pin it, as the Wazuh connector does with
+`CASS_WAZUH_CERT`: compare the presented certificate byte for byte and refuse
+any other. Do not skip verification. The Wazuh connector skipped it in every
+deployed path until 2026-10-14, while sending its API password across the
+public internet; a scan found it.
 
 **What is the natural bound?** Every intent needs a limit that keeps evidence
 inside the model's context. Do not hard-code what that context is: MindRouter's

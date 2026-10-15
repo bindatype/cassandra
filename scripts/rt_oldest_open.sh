@@ -66,17 +66,17 @@ fi
 echo "Active tickets created before $cutoff (more than $days days ago), from $endpoint"
 echo
 clause=""
-oldifs=$IFS
-IFS=$nl
-for queue in $names; do
-	IFS=$oldifs
+# One queue name per line. A here-document, not a pipe, so the loop runs in
+# this shell and clause survives it; IFS is set for each read only.
+while IFS= read -r queue; do
+	[ -n "$queue" ] || continue
 	n=$(rt "$active AND Queue = '$queue' AND Created < '$cutoff'" 1 |
 		python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
 	printf '  %-14s %5s\n' "$queue" "$n"
 	clause="${clause:+$clause OR }Queue = '$queue'"
-	IFS=$nl
-done
-IFS=$oldifs
+done <<EOF
+$names
+EOF
 
 query="$active AND ($clause) AND Created < '$cutoff'"
 if [ "$all" = 1 ]; then
