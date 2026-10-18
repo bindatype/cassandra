@@ -63,6 +63,10 @@ type AuditCall struct {
 	Truncated  bool           `json:"truncated"`
 	Summary    map[string]int `json:"summary,omitempty"`
 
+	// SQLFromQuestion marks a query that appears verbatim in the question, so
+	// the asker wrote it and the model passed it on. Recorded, not refused.
+	SQLFromQuestion bool `json:"sql_from_question,omitempty"`
+
 	// Error marks an attempt that failed rather than a call that returned.
 	// Both spend a turn, so both are recorded.
 	Error string `json:"error,omitempty"`

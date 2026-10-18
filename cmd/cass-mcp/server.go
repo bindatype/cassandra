@@ -25,8 +25,13 @@ const toolName = "cass_ask"
 // Answer is one question's result: Cassandra's prose plus the evidence it was
 // given, so a client can read figures as data instead of parsing sentences.
 type Answer struct {
-	Text     string          `json:"answer"`
-	Evidence json.RawMessage `json:"evidence"`
+	Text string `json:"answer"`
+	// RequestID names the audit record holding this answer's SQL and
+	// evidence, and AsOf is when its figures were true: what a client cites
+	// when it says where a figure came from.
+	RequestID string          `json:"request_id,omitempty"`
+	AsOf      string          `json:"as_of,omitempty"`
+	Evidence  json.RawMessage `json:"evidence"`
 }
 
 // Runner answers one question as one person. The real one runs cass-chat.
@@ -288,10 +293,20 @@ func (s *Server) callTool(ctx context.Context, caller Caller, raw json.RawMessag
 		return toolError(err.Error())
 	}
 	return map[string]any{
-		"content":           []any{map[string]any{"type": "text", "text": answer.Text}},
+		"content":           []any{map[string]any{"type": "text", "text": withProvenance(answer)}},
 		"structuredContent": answer,
 		"isError":           false,
 	}
+}
+
+// withProvenance ends the text a client reads with the answer's request_id
+// and time, so a report built from it has something to cite even when the
+// client ignores structuredContent.
+func withProvenance(answer Answer) string {
+	if answer.RequestID == "" {
+		return answer.Text
+	}
+	return fmt.Sprintf("%s\n\n(Cassandra request_id %s, as of %s)", answer.Text, answer.RequestID, answer.AsOf)
 }
 
 // acquire takes a slot, refusing rather than queueing: a refusal says why,
@@ -343,7 +358,16 @@ func newSessionID() string {
 }
 
 const instructions = "Cassandra answers questions about GW RTS infrastructure from live, read-only sources " +
-	"and says which source each answer came from. Results are internal GW IT data, subject to GW data policy."
+	"and says which source each answer came from. Results are internal GW IT data, subject to GW data policy. " +
+	provenanceRule
+
+// provenanceRule goes to every client model. On 2026-10-18 a client headed a
+// report "Verified Key Findings" with no way to check any of them; several
+// were its own arithmetic on returned rows, and wrong.
+const provenanceRule = "Ask for what you need in plain English; Cassandra chooses the tables and knows " +
+	"their coverage. A figure is verified only if you cite the request_id of the answer it came from, or a " +
+	"second, independent question that reproduced it. Your own arithmetic on returned rows is your work, " +
+	"not Cassandra's: do not label it verified."
 
 func askTool() map[string]any {
 	return map[string]any{
@@ -356,6 +380,7 @@ func askTool() map[string]any {
 			"managed hosts. Returns Cassandra's answer, which names its sources and limits, and the evidence as " +
 			"JSON with figures counted by the source systems; quote figures from the evidence rather than " +
 			"computing your own. One host or one ticket owner per question; for several, ask once each. " +
+			"Each answer ends with its request_id. " + provenanceRule + " " +
 			"Results are internal GW IT data, subject to GW data policy.",
 		"inputSchema": map[string]any{
 			"type":                 "object",

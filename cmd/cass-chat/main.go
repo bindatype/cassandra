@@ -149,11 +149,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	if *asJSON {
+		// request_id and as_of are the answer's provenance: the audit record
+		// that holds its SQL and evidence, and the time its figures describe.
 		out := struct {
-			Answer   string             `json:"answer,omitempty"`
-			Error    string             `json:"error,omitempty"`
-			Evidence []connector.Result `json:"evidence"`
-		}{Answer: answer, Evidence: session.Evidence()}
+			Answer    string             `json:"answer,omitempty"`
+			Error     string             `json:"error,omitempty"`
+			RequestID string             `json:"request_id,omitempty"`
+			AsOf      string             `json:"as_of,omitempty"`
+			Evidence  []connector.Result `json:"evidence"`
+		}{Answer: answer, Evidence: session.Evidence(), RequestID: session.RequestID(),
+			AsOf: session.AskedAt().UTC().Format(time.RFC3339)}
 		if askErr != nil {
 			out.Error = askErr.Error()
 		}

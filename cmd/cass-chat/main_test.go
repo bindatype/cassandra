@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The example policy is the one `ask` falls back to, so testing against it also
@@ -262,4 +267,37 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// An MCP client cites request_id to show where a figure came from, and the
+// audit record it names holds the SQL and evidence; as_of is when the figures
+// were true. Both go out with every -json reply, answered or not.
+func TestJSONReplyCarriesItsProvenance(t *testing.T) {
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"No evidence was needed."}}]}`)
+	}))
+	defer model.Close()
+
+	clearEnv(t)
+	t.Setenv(mindrouterEndpointEnv, model.URL)
+	t.Setenv(mindrouterKeyEnv, "test-key")
+	t.Setenv(zabbixEndpointEnv, "http://zabbix.invalid/api_jsonrpc.php")
+	t.Setenv(zabbixTokenEnv, "test-token")
+
+	var stdout, stderr bytes.Buffer
+	run([]string{"-policy", examplePolicy(t), "-json", "what is broken?"}, strings.NewReader(""), &stdout, &stderr)
+
+	var out struct {
+		RequestID string `json:"request_id"`
+		AsOf      string `json:"as_of"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout is not JSON: %v (%q; stderr %s)", err, stdout.String(), stderr.String())
+	}
+	if out.RequestID == "" {
+		t.Error("request_id is empty")
+	}
+	if _, err := time.Parse(time.RFC3339, out.AsOf); err != nil {
+		t.Errorf("as_of = %q, want an RFC 3339 time: %v", out.AsOf, err)
+	}
 }

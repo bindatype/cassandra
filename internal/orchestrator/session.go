@@ -266,6 +266,13 @@ func (s *Session) WithCaller(person, client string) *Session {
 // Evidence returns every result the model was given while answering.
 func (s *Session) Evidence() []connector.Result { return s.evidence }
 
+// RequestID identifies the last question's audit record. It is what a reader
+// cites to show where a figure came from, and what finds the record again.
+func (s *Session) RequestID() string { return s.event.RequestID }
+
+// AskedAt is when the last question was asked: the time its figures are as of.
+func (s *Session) AskedAt() time.Time { return s.started }
+
 // TraceEntry records one step of the loop so an operator can see exactly what
 // the model proposed and what policy did with it.
 type TraceEntry struct {
@@ -512,10 +519,11 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 			// out of turns on.
 			attemptedQuery := queryFromArguments(call.Function.Arguments)
 			s.event.Calls = append(s.event.Calls, AuditCall{
-				Source: "orchestrator",
-				Action: "attempt_failed",
-				Query:  attemptedQuery,
-				Error:  lastError,
+				Source:          "orchestrator",
+				Action:          "attempt_failed",
+				Query:           attemptedQuery,
+				SQLFromQuestion: sqlFromQuestion(s.event.Question, attemptedQuery),
+				Error:           lastError,
 			})
 
 			// Name a repeat instead of feeding back the same "correct this"
@@ -588,14 +596,15 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		s.record("evidence_collected", fmt.Sprintf("%d source(s)", len(result.Evidence)), true)
 		for _, evidence := range result.Evidence {
 			s.event.Calls = append(s.event.Calls, AuditCall{
-				Source:     evidence.Source,
-				Action:     evidence.Action,
-				Endpoint:   evidence.Endpoint,
-				Query:      evidence.Query,
-				DurationMS: evidence.DurationMS,
-				ItemCount:  evidence.ItemCount,
-				Truncated:  evidence.Truncated,
-				Summary:    evidence.Summary,
+				Source:          evidence.Source,
+				Action:          evidence.Action,
+				Endpoint:        evidence.Endpoint,
+				Query:           evidence.Query,
+				SQLFromQuestion: sqlFromQuestion(s.event.Question, evidence.Query),
+				DurationMS:      evidence.DurationMS,
+				ItemCount:       evidence.ItemCount,
+				Truncated:       evidence.Truncated,
+				Summary:         evidence.Summary,
 			})
 		}
 		messages = append(messages, Message{
@@ -847,6 +856,20 @@ func queryFromArguments(arguments string) string {
 // recognised despite formatting. It does not attempt SQL equivalence.
 func normalizeQuery(query string) string {
 	return strings.ToLower(strings.Join(strings.Fields(query), " "))
+}
+
+// sqlFromQuestion reports whether a query was taken from the question rather
+// than written from it: the question contains the query, ignoring whitespace,
+// case and a trailing semicolon. On 2026-10-18 an MCP client sent 35 questions
+// of the form "Run this SQL against PegasusDB: SELECT ...", every one ran
+// verbatim, and the table rules in the prompt never applied. The flag makes
+// that visible in the audit; it refuses nothing.
+func sqlFromQuestion(question, query string) bool {
+	normalized := strings.TrimRight(normalizeQuery(query), "; ")
+	if len(normalized) < len("select 1 from x") {
+		return false
+	}
+	return strings.Contains(normalizeQuery(question), normalized)
 }
 
 // hostSchema names the hosts the policy authorizes for live evidence without
