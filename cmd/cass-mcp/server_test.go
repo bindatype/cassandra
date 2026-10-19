@@ -192,3 +192,40 @@ func TestTheToolDescriptionNamesHostProcessesAndPorts(t *testing.T) {
 		}
 	}
 }
+
+// A client that writes "verified" must have something to cite. The request_id
+// and time go in the text every client reads and in structuredContent, and
+// the instructions say what verified means.
+func TestRepliesCarryProvenanceAndSayWhatVerifiedMeans(t *testing.T) {
+	s, _ := testServer(t, func(ctx context.Context, c Caller, q string) (Answer, error) {
+		return Answer{Text: "1,042 jobs.", RequestID: "0123456789abcdef", AsOf: "2026-10-18T13:48:45Z",
+			Evidence: json.RawMessage(`[]`)}, nil
+	})
+	init := rpc(t, s, glenKey, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"opencode","version":"2.0"}}}`)
+	if !strings.Contains(init.Body.String(), "request_id") || !strings.Contains(init.Body.String(), "verified only if") {
+		t.Errorf("instructions must say what verified means: %s", init.Body.String())
+	}
+	session := init.Header().Get("Mcp-Session-Id")
+	call := rpc(t, s, glenKey, session, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cass_ask","arguments":{"question":"how many jobs?"}}}`)
+	var reply struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			Structured Answer `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(call.Body.Bytes(), &reply); err != nil || len(reply.Result.Content) != 1 {
+		t.Fatalf("tools/call = %s (%v)", call.Body.String(), err)
+	}
+	if text := reply.Result.Content[0].Text; !strings.Contains(text, "request_id 0123456789abcdef, as of 2026-10-18T13:48:45Z") {
+		t.Errorf("reply text lacks its provenance: %q", text)
+	}
+	if got := reply.Result.Structured; got.RequestID != "0123456789abcdef" || got.AsOf != "2026-10-18T13:48:45Z" {
+		t.Errorf("structuredContent = %+v, want the request_id and time", got)
+	}
+	description, _ := askTool()["description"].(string)
+	if !strings.Contains(description, "plain English") || !strings.Contains(description, "not Cassandra's") {
+		t.Errorf("cass_ask description lacks the provenance rule: %s", description)
+	}
+}

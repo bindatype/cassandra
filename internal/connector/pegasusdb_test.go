@@ -277,6 +277,58 @@ func TestAccountingNotesCoverMemoryColumns(t *testing.T) {
 	}
 }
 
+// On 2026-10-18 a May-October analysis read FY2026, which ends in June, and
+// reported that the data stopped there. The coverage note names the end and
+// the current alternative on every read of a fiscal-year table.
+func TestAccountingNotesStateFiscalYearCoverage(t *testing.T) {
+	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	notes := accountingNotes("SELECT COUNT(*) FROM FY2026 f JOIN fy2026 g USING (JobID) WHERE f.NNodes = 1", at)
+	if len(notes) != 1 {
+		t.Fatalf("notes = %q, want one coverage note for FY2026 however often it is named", notes)
+	}
+	for _, want := range []string{"FY2026", "2025-06-15", "2026-06-30", "runTBL2_jobs", "wait_s"} {
+		if !strings.Contains(notes[0], want) {
+			t.Errorf("FY2026 note lacks %q: %s", want, notes[0])
+		}
+	}
+	unknown := accountingNotes("SELECT COUNT(*) FROM FY2027", at)
+	if len(unknown) != 1 || !strings.Contains(unknown[0], "no recorded coverage") {
+		t.Errorf("an unrecorded fiscal-year table must still be flagged: %q", unknown)
+	}
+	if notes := accountingNotes("SELECT COUNT(*) FROM jobs2VIEW WHERE groupName = 'fy2026x'", at); len(notes) != 0 {
+		t.Errorf("a name that merely contains fy2026 is not the table: %q", notes)
+	}
+}
+
+// The 2026-10-18 analysis wrote 9 May as 1778284800, UTC midnight, which is
+// 8 p.m. on 8 May at the server. A local midnight is what a date means here,
+// and gets no note.
+func TestAccountingNotesRenderEpochLiteralsInTheServerZone(t *testing.T) {
+	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	notes := accountingNotes("SELECT COUNT(*) FROM jobs2VIEW WHERE SubmitTime >= 1778284800 AND SubmitTime <= 1782874532", at)
+	if len(notes) != 2 {
+		t.Fatalf("notes = %q, want one per non-midnight literal", notes)
+	}
+	for _, want := range []string{"1778284800 is 2026-05-08 20:00:00 EDT", "UNIX_TIMESTAMP('2026-05-09')", "4h0m0s"} {
+		if !strings.Contains(notes[0], want) {
+			t.Errorf("first note lacks %q: %s", want, notes[0])
+		}
+	}
+	between := accountingNotes("SELECT 1 FROM jobs2VIEW WHERE EndTime BETWEEN 1778284800 AND 1778371200", at)
+	if len(between) != 2 {
+		t.Errorf("both ends of a BETWEEN are literals to check: %q", between)
+	}
+	for _, query := range []string{
+		"SELECT COUNT(*) FROM jobs2VIEW WHERE SubmitTime >= 1778299200",                   // midnight EDT
+		"SELECT COUNT(*) FROM jobs2VIEW WHERE SubmitTime >= UNIX_TIMESTAMP('2026-05-09')", // the right form
+		"SELECT COUNT(*) FROM jobs2VIEW WHERE JobID = 1778284800",                         // not a time column
+	} {
+		if notes := accountingNotes(query, at); len(notes) != 0 {
+			t.Errorf("%s got notes: %q", query, notes)
+		}
+	}
+}
+
 // The definition note restates the view. If the view's rules change and the
 // note does not, answers would describe a definition that is no longer applied.
 func TestWorkloadDefinitionMatchesTheView(t *testing.T) {

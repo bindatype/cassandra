@@ -2,7 +2,7 @@ GO ?= go
 DIST ?= dist
 BINARY ?= cassd
 
-.PHONY: help install uninstall install-cass-mcp rollback-cass-mcp test verify check-entrypoints test-rt-live test-export-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape probe netbox-probe
+.PHONY: help install uninstall install-cass-mcp rollback-cass-mcp test verify check-entrypoints test-rt-live test-export-live run fmt build-linux-amd64 build-linux-arm64 build-linux-all docker-build docker-up fitness eval-models eval-zabbix eval-pegasus eval-headtohead eval-ablate eval-prompt-ab eval-lead eval-rt-shape eval-graded probe netbox-probe
 
 # Default target: say what exists. A bare `make` that silently builds one
 # thing tells a newcomer nothing about the other fifteen.
@@ -15,6 +15,7 @@ help:
 	@echo '  make test-rt-live      RT invariants against live data (needs RT credentials)'
 	@echo '  make test-export-live  export the incident window from the live view and verify it (needs the view)'
 	@echo '  make eval-rt-shape     does the model bound a ticket-age question (needs credentials)'
+	@echo '  make eval-graded       record answers for grading against a fixed rubric (needs the question set)'
 	@echo '  make fmt               gofmt the tree'
 	@echo ''
 	@echo 'On the host that serves cass-mcp (sgtstubby):'
@@ -118,6 +119,11 @@ test-export-live:
 # grader it has not checked.
 eval-rt-shape:
 	python3 ./scripts/eval_rt_shape.py
+
+# Asks and records only; grading is against the question set's rubric.md, kept
+# with the site's configuration in ~/.config/cass/eval_graded/.
+eval-graded:
+	python3 ./scripts/eval_graded.py
 
 run:
 	$(GO) run ./cmd/cassd

@@ -4,9 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	// The epoch notes need the server's zone whether or not the host running
+	// Cassandra has zoneinfo installed.
+	_ "time/tzdata"
 
 	"github.com/bindatype/cassandra/internal/broker"
 	"github.com/go-sql-driver/mysql"
@@ -247,7 +251,113 @@ func accountingNotes(query string, requestedAt time.Time) []string {
 		notes = append(notes, "as of "+requestedAt.Format(time.RFC3339)+": totals for a past window can still "+
 			"grow until every job submitted in it has finished and been ingested, so quote this time with the figures")
 	}
+	notes = append(notes, fiscalYearNotes(lower)...)
+	notes = append(notes, epochNotes(query)...)
 	return notes
+}
+
+// fiscalYearCoverage is the submit-time span each fiscal-year table holds,
+// measured on the live tables (MIN and MAX of SubmitTime) on 2026-10-18. A
+// fiscal year ends on 30 June; its earliest rows were submitted before the
+// year began and finished in it. Closed years do not change.
+var fiscalYearCoverage = map[string][2]string{
+	"fy2019": {"2019-03-05", "2019-06-30"},
+	"fy2020": {"2019-06-24", "2020-06-30"},
+	"fy2021": {"2020-06-26", "2021-06-30"},
+	"fy2022": {"2021-05-22", "2022-06-30"},
+	"fy2023": {"2022-06-30", "2023-06-30"},
+	"fy2024": {"2023-06-04", "2024-06-30"},
+	"fy2025": {"2024-02-01", "2025-06-30"},
+	"fy2026": {"2025-06-15", "2026-06-30"},
+}
+
+var fiscalYearTable = regexp.MustCompile(`\bfy20\d\d\b`)
+
+// fiscalYearNotes states the coverage of each fiscal-year table a query
+// reads. A window past a closed table's end returns fewer rows rather than an
+// error, and on 2026-10-18 an analysis of May-October read FY2026 and
+// reported that the data stopped in July when runTBL2 held three more months.
+func fiscalYearNotes(lowerQuery string) []string {
+	var notes []string
+	seen := map[string]bool{}
+	for _, table := range fiscalYearTable.FindAllString(lowerQuery, -1) {
+		if seen[table] {
+			continue
+		}
+		seen[table] = true
+		name := strings.ToUpper(table[:2]) + table[2:]
+		span, known := fiscalYearCoverage[table]
+		if !known {
+			notes = append(notes, name+" is a fiscal-year table with no recorded coverage; runTBL2 and "+
+				"runTBL2_jobs are current, so prefer them unless the question names this fiscal year")
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("%s holds only jobs submitted %s to %s; it is closed and gains no "+
+			"rows. For anything submitted after %s, or a window that crosses it, use runTBL2_jobs, which is "+
+			"current and has the same wait, run and school columns precomputed (wait_s, run_s, schoolName)",
+			name, span[0], span[1], span[1]))
+	}
+	return notes
+}
+
+// pegasusTimeZone is the zone the accounting server runs in. Day boundaries
+// in questions mean midnight here, and UNIX_TIMESTAMP('YYYY-MM-DD') on this
+// server returns that midnight.
+const pegasusTimeZone = "America/New_York"
+
+var epochComparison = regexp.MustCompile(`(?i)\b(submittime|starttime|endtime)\s*` +
+	`(?:>=|<=|<>|!=|=|<|>|between)\s*(\d{9,10})\b(?:\s+and\s+(\d{9,10})\b)?`)
+
+// epochNotes renders, in the server's zone, each integer a time column is
+// compared with, unless it is a local midnight. An epoch computed for UTC
+// midnight starts a day four or five hours early here: on 2026-10-18 a
+// May 9 cutoff written as 1778284800 began at 8 p.m. on May 8.
+func epochNotes(query string) []string {
+	zone, err := time.LoadLocation(pegasusTimeZone)
+	if err != nil {
+		return nil
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, match := range epochComparison.FindAllStringSubmatch(query, -1) {
+		for _, literal := range match[2:] {
+			if literal == "" || seen[literal] {
+				continue
+			}
+			seen[literal] = true
+			seconds, err := strconv.ParseInt(literal, 10, 64)
+			if err != nil {
+				continue
+			}
+			local := time.Unix(seconds, 0).In(zone)
+			if local.Hour() == 0 && local.Minute() == 0 && local.Second() == 0 {
+				continue
+			}
+			notes = append(notes, fmt.Sprintf("%s is %s, not a midnight in the server's zone (%s). A day "+
+				"here starts at local midnight, which UNIX_TIMESTAMP('%s') gives on this server; if %s was "+
+				"meant as a date boundary, it is off by %s and the window covers the wrong rows",
+				literal, local.Format("2006-01-02 15:04:05 MST"), pegasusTimeZone,
+				nearestLocalMidnight(local).Format("2006-01-02"), literal, offsetFromMidnight(local)))
+		}
+	}
+	return notes
+}
+
+// nearestLocalMidnight is the date the literal was most likely meant to be.
+func nearestLocalMidnight(local time.Time) time.Time {
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+	if local.Sub(midnight) > 12*time.Hour {
+		return midnight.AddDate(0, 0, 1)
+	}
+	return midnight
+}
+
+func offsetFromMidnight(local time.Time) time.Duration {
+	d := local.Sub(nearestLocalMidnight(local))
+	if d < 0 {
+		d = -d
+	}
+	return d
 }
 
 // countRows reports how many rows the query yields by wrapping it in

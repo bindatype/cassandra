@@ -18,7 +18,9 @@ const (
 // It is deliberately thin: the credential is confined to one schema and
 // cannot write, so the database's grant is the write control, not a verb
 // list here. What it checks is that the statement is a single read (so what
-// is audited is what ran) and two SQL shapes known to compute wrong answers.
+// is audited is what ran), that it takes no locks and does not idle the
+// server (see sql_locking.go), and two SQL shapes known to compute wrong
+// answers.
 func ValidateQuery(query string) error {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
@@ -43,6 +45,16 @@ func ValidateQuery(query string) error {
 	withoutTrailing := strings.TrimRight(trimmed, "; \t\n\r")
 	if strings.Contains(withoutTrailing, ";") {
 		return fmt.Errorf("only a single statement is allowed")
+	}
+
+	// Checked before the constructs below because those checks skip comments,
+	// and the server runs what an executable comment contains.
+	if executableComment(withoutTrailing) {
+		return fmt.Errorf("executable comments (/*! ... */ and /*M! ... */) are not allowed: the server " +
+			"runs their contents. Write the SQL outside a comment")
+	}
+	if construct, ok := lockingOrStallingConstruct(withoutTrailing); ok {
+		return lockingOrStallingError(construct)
 	}
 
 	if conflictingUngroupedAggregateWindow(withoutTrailing) {
