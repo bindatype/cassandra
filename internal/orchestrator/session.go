@@ -245,6 +245,18 @@ type Session struct {
 	// evidence is every result that reached the model, for callers that want
 	// the figures as data rather than retyped in prose.
 	evidence []connector.Result
+	// partial is set when the answer was written at the turn limit, from
+	// whatever evidence had been collected by then.
+	partial bool
+	// localZone, when set, adds local times beside the UTC times in evidence.
+	localZone *time.Location
+}
+
+// WithLocalZone sets the zone evidence times are also given in, so an answer
+// copies a local time rather than converting one. Nil leaves evidence in UTC.
+func (s *Session) WithLocalZone(location *time.Location) *Session {
+	s.localZone = location
+	return s
 }
 
 // WithAudit attaches an audit destination. Without one the session works but
@@ -265,6 +277,10 @@ func (s *Session) WithCaller(person, client string) *Session {
 
 // Evidence returns every result the model was given while answering.
 func (s *Session) Evidence() []connector.Result { return s.evidence }
+
+// Partial reports whether the last answer was written at the turn limit, so
+// parts of the question may be unanswered.
+func (s *Session) Partial() bool { return s.partial }
 
 // RequestID identifies the last question's audit record. It is what a reader
 // cites to show where a figure came from, and what finds the record again.
@@ -370,6 +386,7 @@ func discloseWithheldEvidence(answer string, withheld bool) string {
 func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 	s.trace = nil
 	s.evidence = nil
+	s.partial = false
 	s.started = time.Now()
 	s.event = AuditEvent{
 		RequestID: newRequestID(),
@@ -622,9 +639,81 @@ func (s *Session) Ask(ctx context.Context, question string) (string, error) {
 		detail += "; last error: " + lastError
 	}
 	s.record("turn_limit_reached", detail, false)
+
+	// Evidence collected and then lost to the turn limit is the worst outcome:
+	// the answer was in hand. With anything collected, ask once more with no
+	// tools offered, so an answer is the only shape the reply can take.
+	if succeeded > 0 {
+		answer, err := s.answerAtTurnLimit(ctx, messages, budgetReached)
+		if err != nil {
+			return "", err
+		}
+		if answer != "" {
+			return answer, nil
+		}
+	}
 	s.event.Status = "failed"
 	s.event.Error = detail
-	return "", fmt.Errorf("gave up after %d attempts (%s)", maxToolCalls, detail)
+	return "", fmt.Errorf("used all %d evidence calls without composing an answer (%s)", maxToolCalls, detail)
+}
+
+// turnLimitInstruction is the last turn's prompt. No tools are offered with it.
+const turnLimitInstruction = "You have used every evidence call this question allows, and no more can " +
+	"be made. Answer the question now from the evidence above only. Say plainly which parts of the " +
+	"question you could not answer, and why. Do not describe or propose further calls."
+
+// answerAtTurnLimit asks for an answer from the evidence already collected.
+// It returns "" when the model still produced no answer, leaving the caller
+// to fail as before. The answer is marked partial wherever it is reported.
+func (s *Session) answerAtTurnLimit(ctx context.Context, messages []Message, withheld bool) (string, error) {
+	messages = append(messages, Message{Role: "user", Content: turnLimitInstruction})
+	// The final request carries everything collected so far. If that no
+	// longer fits, drop the oldest results from this one call and say so,
+	// rather than overflow the context.
+	for i := range messages {
+		if estimatedTokens(messages, nil) <= servedContextTokens {
+			break
+		}
+		if messages[i].Role == "tool" {
+			messages[i].Content = `{"error":"withheld from the final answer: the collected evidence exceeded the model context"}`
+			withheld = true
+		}
+	}
+	choice, err := s.complete(ctx, maxToolCalls, messages, nil, "")
+	if err != nil {
+		return "", err
+	}
+	answer := strings.TrimSpace(choice.Message.Content)
+	if answer == "" || len(choice.Message.ToolCalls) > 0 {
+		s.record("turn_limit_no_answer", "the final answer-only turn produced no answer", false)
+		return "", nil
+	}
+	// No turn is left to send quoted SQL back, so it goes out with the warning.
+	if unrun := unrunSQL(answer, s.event.Calls); len(unrun) > 0 {
+		s.record("unrun_sql_in_answer",
+			fmt.Sprintf("%d quoted statement(s) not executed; first: %.200s", len(unrun), unrun[0]), false)
+		answer = unrunSQLWarning + "\n\n" + answer
+	}
+	answer = disclosePartialAnswer(discloseWithheldEvidence(answer, withheld))
+	s.record("answered_at_turn_limit", "answered from the evidence collected before the turn limit", true)
+	s.partial = true
+	s.event.Partial = true
+	s.event.Answer = answer
+	s.event.AnswerChars = len(answer)
+	return answer, nil
+}
+
+// disclosePartialAnswer appends the limitation when the model did not state
+// it, as discloseWithheldEvidence does for withheld evidence.
+func disclosePartialAnswer(answer string) string {
+	low := strings.ToLower(answer)
+	for _, said := range []string{"partial", "incomplete", "could not", "couldn't", "unable to"} {
+		if strings.Contains(low, said) {
+			return answer
+		}
+	}
+	return answer + "\n\nThis answer is partial: Cassandra used all of its evidence calls before " +
+		"finishing, so parts of the question may be unanswered."
 }
 
 // callFailure distinguishes a refusal, which ends the loop, from a mistake the
@@ -710,6 +799,9 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 	if err != nil {
 		s.record("execution_failed", err.Error(), false)
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+	for i := range result.Evidence {
+		connector.LocalizeTimes(&result.Evidence[i], s.localZone)
 	}
 	return result, nil
 }

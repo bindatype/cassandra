@@ -314,7 +314,9 @@ func TestZabbixAppliesSelectorsToTheAPICall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		kind, params := classifyZabbixCall(t, body)
-		if kind == "page" {
+		// The first page is the query; a later one is the unmatched-term
+		// lookup, which drops search by design.
+		if kind == "page" && pageParams == nil {
 			pageParams = params
 			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[]}`)
 			return
@@ -362,7 +364,7 @@ func TestZabbixTriggerSelectorsUseTheTriggerSpelling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		kind, params := classifyZabbixCall(t, body)
-		if kind == "page" {
+		if kind == "page" && pageParams == nil {
 			pageParams = params
 		}
 		io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[]}`)
@@ -782,5 +784,84 @@ func TestZabbixSkipsTheComparisonWithoutATimeBound(t *testing.T) {
 	}
 	if _, present := evidence.Summary["total_ignoring_time_bound"]; present {
 		t.Error("total_ignoring_time_bound appeared without a time bound, where it means nothing")
+	}
+}
+
+// A match that finds nothing must not read as "no events". The 2026-10-23
+// check asked for disk response-time warnings and got none, while the host
+// had 169 under other wording. The evidence says nothing matched the term and
+// lists the names that do exist, from the same query without match.
+func TestZabbixUnmatchedTermListsTheNamesThatExist(t *testing.T) {
+	var probe map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_, params := classifyZabbixCall(t, body)
+		if output, _ := params["output"].([]any); len(output) == 1 && output[0] == "name" {
+			if _, searched := params["search"]; !searched {
+				probe = params
+				io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[
+					{"name":"Disk read request responses are too high"},
+					{"name":"Disk read request responses are too high"},
+					{"name":"GPFS long waiters"}]}`)
+				return
+			}
+		}
+		io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[]}`)
+	}))
+	defer server.Close()
+
+	evidence, err := newTestZabbix(t, server.URL).Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceZabbixAPI,
+		Action: "event.get",
+		Limit:  25,
+		Since:  "2026-10-21T15:00:00Z",
+		Until:  "2026-10-22T04:00:00Z",
+		Match:  "disk response-time",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if probe == nil {
+		t.Fatal("no follow-up lookup without match was made")
+	}
+	if probe["time_from"] == nil || probe["time_till"] == nil {
+		t.Errorf("follow-up lookup dropped the window: %v", probe)
+	}
+	if found, ok := evidence.Summary["match_found"]; !ok || found != 0 {
+		t.Errorf("summary = %v, want match_found 0", evidence.Summary)
+	}
+	note := strings.Join(evidence.Notes, " ")
+	if !strings.Contains(note, `found no event whose name contains it`) ||
+		!strings.Contains(note, `"Disk read request responses are too high", "GPFS long waiters"`) {
+		t.Errorf("notes = %q, want the miss stated and the distinct names listed", note)
+	}
+}
+
+// A term that matched needs no lookup.
+func TestZabbixMatchedTermMakesNoLookup(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		kind, _ := classifyZabbixCall(t, body)
+		switch kind {
+		case "page":
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[{"eventid":"1","clock":"1792620000","name":"GPFS long waiters","severity":"4","value":"1","hosts":[{"host":"node01"}]}]}`)
+		case "severity-census":
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[{"severity":"4"}]}`)
+		default:
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":[]}`)
+		}
+	}))
+	defer server.Close()
+
+	evidence, err := newTestZabbix(t, server.URL).Execute(context.Background(), broker.RouteStep{
+		Source: broker.SourceZabbixAPI, Action: "event.get", Limit: 25, Match: "GPFS",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, ok := evidence.Summary["match_found"]; ok {
+		t.Errorf("summary = %v; a match that found rows needs no note", evidence.Summary)
 	}
 }

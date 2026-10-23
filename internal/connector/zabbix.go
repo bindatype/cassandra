@@ -215,6 +215,9 @@ func (c *ZabbixConnector) Execute(ctx context.Context, step broker.RouteStep) (E
 			return Evidence{}, err
 		}
 	}
+	if step.Match != "" && total == 0 {
+		c.noteUnmatchedTerm(ctx, &evidence, method, params)
+	}
 	return evidence, nil
 }
 
@@ -347,7 +350,79 @@ func (c *ZabbixConnector) executeEvents(ctx context.Context, step broker.RouteSt
 	} else {
 		countHostsInPage(&evidence)
 	}
+	if step.Match != "" && total == 0 {
+		c.noteUnmatchedTerm(ctx, &evidence, "event.get", params)
+	}
 	return evidence, nil
+}
+
+// unmatchedNameLimit bounds the names listed when a match finds nothing, and
+// unmatchedProbeRows the rows read to find them.
+const (
+	unmatchedNameLimit = 20
+	unmatchedProbeRows = 200
+)
+
+// noteUnmatchedTerm runs when match found nothing. match is a substring of
+// the stored name, so other wording finds nothing: "disk response-time" found
+// no warnings on 2026-10-23 while the host had 169 under another name. It
+// repeats the query without match and lists the names that do exist, so an
+// empty result reads as "no name contained this", not "no events". A failed
+// lookup is a warning; the evidence already collected stands.
+func (c *ZabbixConnector) noteUnmatchedTerm(ctx context.Context, evidence *Evidence, method string, params map[string]any) {
+	column, kind := "description", "trigger"
+	if method == "event.get" {
+		column, kind = "name", "event"
+	}
+	probe := make(map[string]any, len(params))
+	for key, value := range params {
+		probe[key] = value
+	}
+	delete(probe, "search")
+	delete(probe, "countOutput")
+	probe["output"] = []string{column}
+	probe["limit"] = unmatchedProbeRows
+	payload, err := c.rawCall(ctx, method, probe)
+	var envelope struct {
+		Result []map[string]any `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+			Data    string `json:"data"`
+		} `json:"error"`
+	}
+	if err == nil {
+		err = json.Unmarshal(payload, &envelope)
+	}
+	if err == nil && envelope.Error != nil {
+		err = fmt.Errorf("%s: %s", envelope.Error.Message, envelope.Error.Data)
+	}
+	if evidence.Summary == nil {
+		evidence.Summary = map[string]int{}
+	}
+	evidence.Summary["match_found"] = 0
+	note := fmt.Sprintf("match %q found no %s whose name contains it. That is not the same as no %ss: "+
+		"match is a plain substring of the stored name, and other wording does not match.", evidence.Match, kind, kind)
+	if err != nil {
+		evidence.Warnings = append(evidence.Warnings, "the names that do exist could not be listed: "+err.Error())
+		evidence.Notes = append(evidence.Notes, note)
+		return
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, row := range envelope.Result {
+		name, _ := row[column].(string)
+		if name != "" && !seen[name] && len(names) < unmatchedNameLimit {
+			seen[name] = true
+			names = append(names, fmt.Sprintf("%q", name))
+		}
+	}
+	if len(names) == 0 {
+		note += fmt.Sprintf(" Without match, the same filters find no %ss either.", kind)
+	} else {
+		note += fmt.Sprintf(" Without match, the same filters find %ss named (first %d distinct of up to %d rows): %s. "+
+			"Repeat the query with match set to the wording of the one that fits.", kind, len(names), unmatchedProbeRows, strings.Join(names, ", "))
+	}
+	evidence.Notes = append(evidence.Notes, note)
 }
 
 // applySelectors adds the request's narrowing filters to a set of API

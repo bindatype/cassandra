@@ -54,6 +54,7 @@ Without `since`, `monitoring.problems` returns the most severe problems, not the
 **But a time bound on `monitoring.problems` filters on when a trigger last CHANGED state, not on whether it is broken.** It selects problems that changed inside the window and are still firing. A machine that broke yesterday and is still broken changed state yesterday, so the bound removes it — and the empty result reads as good news. Asked whether any host had lost its Zabbix agent since 05:00, a bounded query returned **0** and the answer was "no host has lost its Zabbix agent". The same query with no bound returned **19**.
 So: a question about what is *wrong* takes no bound. A bound belongs only on a question about what *changed*. When one is applied, the evidence carries `summary.total_ignoring_time_bound`; if it exceeds `total_matching`, the difference is problems your window hid, and you must report the unbounded number rather than the filtered one. `database.query` bounds time in its `WHERE` clause and rejects `since`.
 The evidence reports the bound that was applied as `since`. If you asked for one and the evidence does not carry it, the result is unfiltered: say so rather than describing it as a time-scoped answer.
+**Time zones.** Zabbix, Wazuh and Request Tracker evidence gives times in UTC (RFC 3339, ending `Z`). When this deployment sets a local zone, each such time also has a `_local` twin, and the evidence carries `since_local` and `until_local`. Report times in the zone the question used, copying the `_local` values rather than converting them yourself, and never label a UTC time with a local zone name. When the question gives local times, pass `since` and `until` with their offset, such as `2026-10-21T11:00:00-04:00`. Decide whether an event falls inside the window by comparing times in one zone. The accounting database renders `FROM_UNIXTIME` and `UNIX_TIMESTAMP('...')` in its server zone, which its evidence names. Offsets are for `since` and `until` only: in SQL, write a time literal as a plain server-local time, `UNIX_TIMESTAMP('2026-10-21 21:50:00')`, because the server ignores an offset in a literal and reads the rest as local.
 `monitoring.problems` and `monitoring.history` take a host and four more selectors. Nothing else does; the broker refuses them elsewhere rather than ignoring them.
 - `host` -- an exact host name. **Both intents accept it.**
 - `match` -- a plain substring of the problem name, case-insensitive. Not a pattern: no wildcards, no regex.
@@ -150,6 +151,9 @@ Rules for `database.query`:
   then bound the real query with that day. `CURDATE()` is the wrong anchor
   here: it is ahead of the data by about a day, so it selects a partial day
   and reports a fraction of it as a total.
+  It is loaded nightly from the scheduler's own accounting, one row per
+  JobID holding that job's final attempt; earlier attempts of a requeued job
+  are not rows here.
 These are every column of `runTBL2`; `runTBL2_workload` has the same columns plus `workload`. The nodes a job ran on are in `NodeList`; there is no `Hostname` column, and there is no `RunTime`, `WaitTime` or `Timelimit` column.
 Columns marked *text* hold numbers stored as strings. `MAX`, `ORDER BY`, `<` and `>` on them compare characters, not values: over the first week of September 2026, `MAX(TimelimitRaw)` returned 960 while the longest limit was 20160. Write `CAST(col AS UNSIGNED)` before comparing, sorting or aggregating one.
 | Column | Meaning |
@@ -221,6 +225,7 @@ WHERE table_schema='pegasusdb'
 - Bucket by hour with `DATE_FORMAT(FROM_UNIXTIME(SubmitTime), '%Y-%m-%d %H')`.
 - Unless the user says otherwise, "on a given day" means submit date.
 - A relative window like "last 7 days" is ambiguous. Use `NOW()` for a rolling window and say that you did so.
+- "Ran during", "ran on ... between", "was running at" or "active in" a window means the job overlapped it: `StartTime > 0 AND StartTime < end AND EndTime > start`. Only "ran entirely within" or "started and finished between" means `StartTime >= start AND EndTime <= end`, which drops every job that began before the window or ended after it. Say which you used.
 - Wait and run times are in seconds, whether derived or read from a `WaitTime` or `RunTime` column.
 - Divide by `3600` for hours.
 - A time limit is in minutes: `TimelimitRaw` in `runTBL2`, `Timelimit` in `jobs2VIEW` and the FY tables.
@@ -288,6 +293,7 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 - One form for every percentile is the point. A query reporting P50 with `MEDIAN` and P95 with `PERCENTILE_CONT` invites a reader to wonder whether the two were computed the same way, and `WITHIN GROUP (ORDER BY ...)` states the ordering expression outright, which matters when it is derived like `StartTime - SubmitTime` rather than a plain column.
 - `MEDIAN(expr) OVER (...)` also exists and MariaDB defines it as exactly `PERCENTILE_CONT(0.5)` with the `ORDER BY` being the expression. It is shorthand, not a different calculation. Read it correctly if you meet it; do not reach for it.
 - `PERCENTILE_CONT` interpolates, so the value it returns need not be any observed value.
+- When a list is too large to return, say how many rows matched and give the aggregate in the same answer, from one more query: counts by state, partition or day. Declining without it leaves the reader nothing.
 - **A failed query is a failed calculation, never a zero.** If the SQL errors, report that the figure could not be computed and why; do not answer "the median is 0" or "no jobs waited". An error means the question is unanswered, not answered with nothing.
 - A computed `0.00` hours, on the other hand, can be real: rounded to two decimals it means anything under about eighteen seconds. Before calling such a result suspicious, look at it in seconds.
 - Never mix a plain aggregate and a window function in the same `SELECT` when you intend both to describe the same uncollapsed population.

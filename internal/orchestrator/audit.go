@@ -45,10 +45,13 @@ type AuditEvent struct {
 	// evidence and the prose written over it.
 	Answer string `json:"answer,omitempty"`
 	// AnswerChars is the true length, kept even when Answer is capped.
-	AnswerChars int    `json:"answer_chars,omitempty"`
-	Status      string `json:"status"`
-	Error       string `json:"error,omitempty"`
-	DurationMS  int64  `json:"duration_ms"`
+	AnswerChars int `json:"answer_chars,omitempty"`
+	// Partial marks an answer written at the turn limit from the evidence
+	// collected by then; parts of the question may be unanswered.
+	Partial    bool   `json:"partial,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 // AuditCall records one connector execution: the summary, not the items,

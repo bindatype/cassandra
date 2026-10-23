@@ -29,9 +29,12 @@ type Answer struct {
 	// RequestID names the audit record holding this answer's SQL and
 	// evidence, and AsOf is when its figures were true: what a client cites
 	// when it says where a figure came from.
-	RequestID string          `json:"request_id,omitempty"`
-	AsOf      string          `json:"as_of,omitempty"`
-	Evidence  json.RawMessage `json:"evidence"`
+	RequestID string `json:"request_id,omitempty"`
+	AsOf      string `json:"as_of,omitempty"`
+	// Partial marks an answer written when Cassandra ran out of evidence
+	// calls; parts of the question may be unanswered.
+	Partial  bool            `json:"partial,omitempty"`
+	Evidence json.RawMessage `json:"evidence"`
 }
 
 // Runner answers one question as one person. The real one runs cass-chat.
@@ -305,6 +308,9 @@ func (s *Server) callTool(ctx context.Context, caller Caller, raw json.RawMessag
 func withProvenance(answer Answer) string {
 	if answer.RequestID == "" {
 		return answer.Text
+	}
+	if answer.Partial {
+		return fmt.Sprintf("%s\n\n(Cassandra request_id %s, as of %s; partial answer)", answer.Text, answer.RequestID, answer.AsOf)
 	}
 	return fmt.Sprintf("%s\n\n(Cassandra request_id %s, as of %s)", answer.Text, answer.RequestID, answer.AsOf)
 }
