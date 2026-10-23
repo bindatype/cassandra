@@ -471,3 +471,82 @@ func TestEmptyPortMatchMakesNoNameLookup(t *testing.T) {
 		t.Errorf("processes queries = %v, want none for a port match", got)
 	}
 }
+
+// agentDirectory is a Wazuh manager that answers /agents by exact name, and
+// by the name~ filter a short-name lookup sends. Inventory tables are empty
+// apart from one dated row.
+func agentDirectory(t *testing.T, agents ...string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/security/user/authenticate"):
+			io.WriteString(w, "jwt\n")
+		case r.URL.Path == "/agents":
+			var items []string
+			for i, name := range agents {
+				exact := query.Get("name") == name
+				like := strings.HasPrefix(query.Get("q"), "name~") &&
+					strings.Contains(name, strings.TrimPrefix(query.Get("q"), "name~"))
+				if exact || like {
+					items = append(items, fmt.Sprintf(`{"id":"%03d","name":%q,"status":"active","lastKeepAlive":"2026-10-23T11:00:00+00:00"}`, i+1, name))
+				}
+			}
+			fmt.Fprintf(w, `{"data":{"affected_items":[%s],"total_affected_items":%d},"error":0}`, strings.Join(items, ","), len(items))
+		case strings.HasPrefix(r.URL.Path, "/syscollector/"):
+			fmt.Fprintf(w, `{"data":{"affected_items":[{"scan":{"time":%q}}],"total_affected_items":1},"error":0}`, minutesAgo(5))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// Short names were refused as unknown agents on 2026-10-23. A name
+// that begins exactly one agent's name, up to a dot, resolves to it.
+func TestShortHostNameResolvesToTheOnlyMatchingAgent(t *testing.T) {
+	server := agentDirectory(t, "db01.example.edu", "db01dev.example.edu", "node01.example.edu")
+	defer server.Close()
+	c := inventoryConnector(t, server.URL)
+
+	step := inventoryStep("syscollector.processes", "")
+	step.Host = "db01"
+	evidence, err := c.Execute(context.Background(), step)
+	if err != nil {
+		t.Fatalf("inventory: %v", err)
+	}
+	if note := strings.Join(evidence.Notes, " "); !strings.Contains(note, `"db01" was resolved to the Wazuh agent "db01.example.edu"`) {
+		t.Errorf("notes = %q, want the resolution stated", note)
+	}
+
+	status, err := c.Execute(context.Background(), broker.RouteStep{Source: broker.SourceWazuhAPI, Action: "agents.status", Host: "db01"})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.ItemCount != 1 || status.Items[0].Host != "db01.example.edu" {
+		t.Errorf("status items = %+v, want db01.example.edu", status.Items)
+	}
+}
+
+// Two agents beginning with the name is a question for the asker, not a guess.
+func TestAmbiguousShortHostNameListsTheCandidates(t *testing.T) {
+	server := agentDirectory(t, "head1.example.edu", "head1.other.edu")
+	defer server.Close()
+	step := inventoryStep("syscollector.processes", "")
+	step.Host = "head1"
+	_, err := inventoryConnector(t, server.URL).Execute(context.Background(), step)
+	if err == nil || !strings.Contains(err.Error(), "unknown_agent") ||
+		!strings.Contains(err.Error(), "head1.example.edu, head1.other.edu") {
+		t.Fatalf("error = %v, want unknown_agent naming both candidates", err)
+	}
+}
+
+// A full name that matches nothing is still an unknown agent, with no guessing.
+func TestFullHostNameIsNeverExpanded(t *testing.T) {
+	server := agentDirectory(t, "db01.example.edu.old")
+	defer server.Close()
+	step := inventoryStep("syscollector.processes", "")
+	step.Host = "db01.example.edu"
+	if _, err := inventoryConnector(t, server.URL).Execute(context.Background(), step); err == nil ||
+		!strings.Contains(err.Error(), "unknown_agent") {
+		t.Fatalf("error = %v, want unknown_agent", err)
+	}
+}

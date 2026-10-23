@@ -110,6 +110,20 @@ func (c *WazuhConnector) executeInventory(ctx context.Context, step broker.Route
 	if err != nil {
 		return Evidence{}, err
 	}
+	var resolvedNote string
+	if len(agents.Data.AffectedItems) == 0 {
+		name, err := c.expandShortName(ctx, step.Host)
+		if err != nil {
+			return Evidence{}, err
+		}
+		if name != "" {
+			lookup.Set("name", name)
+			if agents, err = c.get(ctx, "/agents", lookup); err != nil {
+				return Evidence{}, err
+			}
+			resolvedNote = resolvedNameNote(step.Host, name)
+		}
+	}
 	if len(agents.Data.AffectedItems) == 0 {
 		return Evidence{}, newConnectorError("unknown_agent", fmt.Sprintf(
 			"Wazuh has no agent named %q; inventory is per agent, so the name must match exactly", step.Host))
@@ -162,6 +176,9 @@ func (c *WazuhConnector) executeInventory(ctx context.Context, step broker.Route
 	}](ctx, c, base, url.Values{"sort": {"-scan.time"}, "limit": {"1"}, "select": {"scan.time"}})
 	if err != nil {
 		return Evidence{}, err
+	}
+	if resolvedNote != "" {
+		evidence.Notes = append(evidence.Notes, resolvedNote)
 	}
 	if retried != "" {
 		evidence.Summary["match_retried"] = 1
