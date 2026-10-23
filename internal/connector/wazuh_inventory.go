@@ -130,13 +130,29 @@ func (c *WazuhConnector) executeInventory(ctx context.Context, step broker.Route
 		Match:       step.Match,
 		RequestedAt: requestedAt,
 	}
-	if table == "processes" {
-		err = c.fillProcesses(ctx, base, agent.Name, step.Match, &evidence)
-	} else {
-		err = c.fillListeners(ctx, base, agent.Name, step.Match, &evidence)
+	fill := c.fillProcesses
+	if table != "processes" {
+		fill = c.fillListeners
 	}
-	if err != nil {
+	if err = fill(ctx, base, agent.Name, step.Match, &evidence); err != nil {
 		return Evidence{}, err
+	}
+	// A name spelled with - where the process uses _ (zabbix-agent2 against
+	// zabbix_agent2) matched nothing and read as "not running" on 2026-10-23.
+	// Try the other separator once, and say which spelling matched.
+	var retried string
+	if alternate := swapSeparators(step.Match); step.Match != "" && evidence.ItemCount == 0 && alternate != step.Match {
+		if _, isPort := broker.InventoryMatchPort(step.Match); !isPort {
+			second := evidence
+			if err = fill(ctx, base, agent.Name, alternate, &second); err != nil {
+				return Evidence{}, err
+			}
+			if second.ItemCount > 0 {
+				second.Match = alternate
+				evidence = second
+				retried = alternate
+			}
+		}
 	}
 
 	// Dated from the whole table, not the filtered rows: a match on one
@@ -147,8 +163,22 @@ func (c *WazuhConnector) executeInventory(ctx context.Context, step broker.Route
 	if err != nil {
 		return Evidence{}, err
 	}
-	if step.Match != "" && evidence.ItemCount == 0 {
-		evidence.Notes = append(evidence.Notes, emptyMatchNote(step.Action, step.Match))
+	if retried != "" {
+		evidence.Summary["match_retried"] = 1
+		evidence.Notes = append(evidence.Notes, fmt.Sprintf(
+			"match %q found nothing; %q, with - and _ swapped, found these rows. Name the process as %q.",
+			step.Match, retried, retried))
+	} else if step.Match != "" && evidence.ItemCount == 0 {
+		note := emptyMatchNote(step.Action, step.Match)
+		if _, isPort := broker.InventoryMatchPort(step.Match); !isPort {
+			names, err := c.nearProcessNames(ctx, "/syscollector/"+agent.ID+"/processes", step.Match)
+			if err != nil {
+				evidence.Warnings = append(evidence.Warnings, "similar process names could not be listed: "+err.Error())
+			} else if len(names) > 0 {
+				note += fmt.Sprintf(". Process names in this inventory sharing its first letters: %s", strings.Join(names, ", "))
+			}
+		}
+		evidence.Notes = append(evidence.Notes, note)
 	}
 	var warnings []string
 	if agent.Status != "active" {
@@ -182,6 +212,52 @@ func (c *WazuhConnector) executeInventory(ctx context.Context, step broker.Route
 	evidence.Warnings = warnings
 	evidence.DurationMS = time.Since(requestedAt).Milliseconds()
 	return evidence, nil
+}
+
+// swapSeparators exchanges - and _, the two spellings process names mix up.
+func swapSeparators(match string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '-':
+			return '_'
+		case '_':
+			return '-'
+		}
+		return r
+	}, match)
+}
+
+// nearNameLimit bounds how many similar names an empty match lists.
+const nearNameLimit = 20
+
+// nearProcessNames lists distinct process names sharing the first four
+// characters of a match that found nothing, so a reader can see whether the
+// term was misspelled or the process is absent.
+func (c *WazuhConnector) nearProcessNames(ctx context.Context, processes, match string) ([]string, error) {
+	prefix := match
+	if len(prefix) > 4 {
+		prefix = prefix[:4]
+	}
+	page, err := getPage[struct {
+		Name string `json:"name"`
+	}](ctx, c, processes, url.Values{
+		"select": {"name"},
+		"sort":   {"+name"},
+		"limit":  {strconv.Itoa(inventoryItemCap)},
+		"q":      {"name~" + prefix},
+	})
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, p := range page.Data.AffectedItems {
+		if p.Name != "" && !seen[p.Name] && len(names) < nearNameLimit {
+			seen[p.Name] = true
+			names = append(names, p.Name)
+		}
+	}
+	return names, nil
 }
 
 // emptyMatchNote says what an empty filtered result does and does not mean.

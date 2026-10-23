@@ -26,6 +26,9 @@ type fakeInventory struct {
 	portTotal map[string]int
 	newest    string // scan.time of the newest row; "" for an empty table
 	tableBody string // if set, the raw body of every table read
+	// procByQ, if set, answers a processes read by its q filter instead of
+	// processes; a q absent from it gets no rows.
+	procByQ map[string]string
 
 	mu      sync.Mutex
 	queries []string
@@ -57,6 +60,14 @@ func (f *fakeInventory) serve(t *testing.T) *httptest.Server {
 					return
 				}
 				fmt.Fprintf(w, `{"data":{"affected_items":[{"scan":{"time":%q}}],"total_affected_items":1},"error":0}`, f.newest)
+				return
+			}
+			if strings.HasSuffix(r.URL.Path, "/processes") && f.procByQ != nil {
+				items, ok := f.procByQ[query.Get("q")]
+				if !ok {
+					items = "[]"
+				}
+				fmt.Fprintf(w, `{"data":{"affected_items":%s,"total_affected_items":%d},"error":0}`, items, strings.Count(items, `"name"`))
 				return
 			}
 			if strings.HasSuffix(r.URL.Path, "/processes") {
@@ -395,5 +406,68 @@ func TestAnEmptyFilteredResultSaysWhatWasFiltered(t *testing.T) {
 				t.Errorf("notes = %v, want the empty filter explained (%s)", evidence.Notes, tc.want)
 			}
 		})
+	}
+}
+
+// On 2026-10-23 "zabbix-agent2" matched nothing on a host running
+// zabbix_agent2, and the question read it as not running. The other
+// separator is tried once, and the evidence names the spelling that matched.
+func TestProcessMatchRetriesTheOtherSeparator(t *testing.T) {
+	fake := &fakeInventory{agent: activeAgent, newest: minutesAgo(5), procByQ: map[string]string{
+		"name~zabbix_agent2": `[{"name":"zabbix_agent2","pid":"812","ppid":"1","euser":"zabbix","state":"S"}]`,
+	}}
+	server := fake.serve(t)
+	defer server.Close()
+	evidence, err := inventoryConnector(t, server.URL).Execute(context.Background(),
+		inventoryStep("syscollector.processes", "zabbix-agent2"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if evidence.ItemCount != 1 || evidence.Match != "zabbix_agent2" || evidence.Summary["match_retried"] != 1 {
+		t.Fatalf("items = %d, match = %q, summary = %v; want the retried spelling's row", evidence.ItemCount, evidence.Match, evidence.Summary)
+	}
+	if note := strings.Join(evidence.Notes, " "); !strings.Contains(note, `"zabbix-agent2" found nothing; "zabbix_agent2"`) {
+		t.Errorf("notes = %q, want the retry stated", note)
+	}
+	for _, note := range evidence.Notes {
+		if strings.Contains(note, "nothing matched that filter") {
+			t.Errorf("a retry that matched must not also say nothing matched: %q", note)
+		}
+	}
+}
+
+// When neither spelling matches, the note lists names that share the term's
+// first letters, so a misspelling and an absent process look different.
+func TestEmptyProcessMatchListsNearNames(t *testing.T) {
+	fake := &fakeInventory{agent: activeAgent, newest: minutesAgo(5), procByQ: map[string]string{
+		"name~mmfs": `[{"name":"mmfsd"},{"name":"mmfsd"},{"name":"mmfsadm"}]`,
+	}}
+	server := fake.serve(t)
+	defer server.Close()
+	evidence, err := inventoryConnector(t, server.URL).Execute(context.Background(),
+		inventoryStep("syscollector.processes", "mmfs-daemon"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if evidence.ItemCount != 0 {
+		t.Fatalf("items = %d, want none", evidence.ItemCount)
+	}
+	note := strings.Join(evidence.Notes, " ")
+	if !strings.Contains(note, "nothing matched that filter") || !strings.Contains(note, "sharing its first letters: mmfsd, mmfsadm") {
+		t.Errorf("notes = %q, want the empty match explained and the distinct near names listed", note)
+	}
+}
+
+// A port is a number, not a name: no separator retry and no near names.
+func TestEmptyPortMatchMakesNoNameLookup(t *testing.T) {
+	fake := &fakeInventory{agent: activeAgent, processes: `[]`, newest: minutesAgo(5)}
+	server := fake.serve(t)
+	defer server.Close()
+	if _, err := inventoryConnector(t, server.URL).Execute(context.Background(),
+		inventoryStep("syscollector.listeners", "8443")); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got := fake.sent("/processes"); len(got) != 0 {
+		t.Errorf("processes queries = %v, want none for a port match", got)
 	}
 }
