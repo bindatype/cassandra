@@ -156,9 +156,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			Error     string             `json:"error,omitempty"`
 			RequestID string             `json:"request_id,omitempty"`
 			AsOf      string             `json:"as_of,omitempty"`
+			Partial   bool               `json:"partial,omitempty"`
 			Evidence  []connector.Result `json:"evidence"`
 		}{Answer: answer, Evidence: session.Evidence(), RequestID: session.RequestID(),
-			AsOf: session.AskedAt().UTC().Format(time.RFC3339)}
+			AsOf: session.AskedAt().UTC().Format(time.RFC3339), Partial: session.Partial()}
 		if askErr != nil {
 			out.Error = askErr.Error()
 		}
