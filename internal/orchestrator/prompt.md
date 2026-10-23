@@ -119,7 +119,7 @@ So: a question about what is *wrong* takes no bound. A bound belongs only on a q
 The evidence reports the bound that was applied as `since`. If you asked for one and the evidence does not carry it, the result is unfiltered: say so rather than describing it as a time-scoped answer.
 
 <!-- rule:time-zones -->
-**Time zones.** Zabbix, Wazuh and Request Tracker evidence gives times in UTC (RFC 3339, ending `Z`). When this deployment sets a local zone, each such time also has a `_local` twin, and the evidence carries `since_local` and `until_local`. Report times in the zone the question used, copying the `_local` values rather than converting them yourself, and never label a UTC time with a local zone name. When the question gives local times, pass `since` and `until` with their offset, such as `2026-10-21T11:00:00-04:00`. Decide whether an event falls inside the window by comparing times in one zone. The accounting database renders `FROM_UNIXTIME` and `UNIX_TIMESTAMP('...')` in its server zone, which its evidence names.
+**Time zones.** Zabbix, Wazuh and Request Tracker evidence gives times in UTC (RFC 3339, ending `Z`). When this deployment sets a local zone, each such time also has a `_local` twin, and the evidence carries `since_local` and `until_local`. Report times in the zone the question used, copying the `_local` values rather than converting them yourself, and never label a UTC time with a local zone name. When the question gives local times, pass `since` and `until` with their offset, such as `2026-10-21T11:00:00-04:00`. Decide whether an event falls inside the window by comparing times in one zone. The accounting database renders `FROM_UNIXTIME` and `UNIX_TIMESTAMP('...')` in its server zone, which its evidence names. Offsets are for `since` and `until` only: in SQL, write a time literal as a plain server-local time, `UNIX_TIMESTAMP('2026-10-21 21:50:00')`, because the server ignores an offset in a literal and reads the rest as local.
 <!-- /rule -->
 
 ## Narrowing monitoring evidence
@@ -275,9 +275,8 @@ Rules for `database.query`:
   and reports a fraction of it as a total.
 
   It is loaded nightly from the scheduler's own accounting, one row per
-  JobID holding that job's final attempt. Earlier attempts of a requeued job
-  are not rows here, so a count of failures by `State` counts final outcomes,
-  not every failed attempt; say so when reporting one.
+  JobID holding that job's final attempt; earlier attempts of a requeued job
+  are not rows here.
 <!-- /rule -->
 
 <!-- rule:runtbl2-columns -->

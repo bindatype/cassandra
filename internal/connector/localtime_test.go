@@ -72,3 +72,19 @@ func TestLocalTimeFunctionsAreRecognised(t *testing.T) {
 		}
 	}
 }
+
+// MariaDB 10.3 truncates an offset in a time literal and reads the rest as
+// server time, so a literal written with one is noted, and one without is not.
+func TestOffsetLiteralsAreNoted(t *testing.T) {
+	for query, want := range map[string]int{
+		"SELECT COUNT(*) FROM runTBL2 WHERE EndTime >= UNIX_TIMESTAMP('2026-10-21 21:50:00-04:00')": 1,
+		"SELECT COUNT(*) FROM runTBL2 WHERE EndTime >= UNIX_TIMESTAMP('2026-10-21T21:50:00Z')":      1,
+		"SELECT COUNT(*) FROM runTBL2 WHERE EndTime >= UNIX_TIMESTAMP('2026-10-21 21:50:00')":       0,
+		"SELECT COUNT(*) FROM runTBL2 WHERE EndTime >= UNIX_TIMESTAMP('2026-10-21')":                0,
+	} {
+		notes := offsetLiteralNotes(query)
+		if len(notes) != want {
+			t.Errorf("%s: %d notes, want %d: %v", query, len(notes), want, notes)
+		}
+	}
+}

@@ -240,10 +240,10 @@ const workloadReporting = "before answering, also give: for a window that spans 
 // 2026-10-23 a count of 56 failed jobs in an incident window was reported
 // without a caveat; the scheduler's own accounting showed 111, because the
 // requeued jobs' failed attempts are not rows here.
-const finalAttemptNote = "runTBL2 keeps one row per JobID, holding that job's final attempt only. A job that " +
-	"failed (for example NODE_FAIL) and was requeued appears once, with the state of its last attempt, so a " +
-	"count of failures, lost work or incident impact from it counts final outcomes and misses earlier failed " +
-	"attempts. Say so when reporting such a count"
+const finalAttemptNote = "runTBL2 keeps one row per JobID, holding that job's final attempt only. A job " +
+	"that was requeued, for example after a NODE_FAIL, appears once with the state of its last attempt, so a " +
+	"count by State reflects final outcomes, not earlier attempts. When the count is about failures, lost work " +
+	"or incident impact, say so"
 
 // localTimeFunction matches the functions that read or write the server's
 // local time, as opposed to the zone-free Unix-second columns.
@@ -297,6 +297,30 @@ func accountingNotes(query string, requestedAt time.Time) []string {
 	}
 	notes = append(notes, fiscalYearNotes(lower)...)
 	notes = append(notes, epochNotes(query)...)
+	notes = append(notes, offsetLiteralNotes(query)...)
+	return notes
+}
+
+// offsetLiteral matches a time literal that carries a zone offset or Z.
+var offsetLiteral = regexp.MustCompile(`'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)(Z|[+-]\d{2}:?\d{2})'`)
+
+// offsetLiteralNotes flags a time literal written with an offset. MariaDB
+// 10.3 truncates the offset with only a warning and reads the rest as server
+// time, measured 2026-10-23: '... 21:50:00+00:00' and '... 21:50:00-04:00'
+// gave the same epoch. An offset other than the server's own then moves the
+// window by hours without an error.
+func offsetLiteralNotes(query string) []string {
+	var notes []string
+	seen := map[string]bool{}
+	for _, match := range offsetLiteral.FindAllStringSubmatch(query, -1) {
+		if seen[match[0]] {
+			continue
+		}
+		seen[match[0]] = true
+		notes = append(notes, fmt.Sprintf("the literal %s carries the offset %s, which this server ignores: it was "+
+			"read as %s in the server's own zone. If the offset differs from the server's, the window is off by "+
+			"the difference; write the time as server-local instead", match[0], match[2], match[1]))
+	}
 	return notes
 }
 
