@@ -27,12 +27,17 @@ type Evidence struct {
 	Since string `json:"since,omitempty"`
 	// Until is the upper time bound applied. Without it a window on a past
 	// day runs to now, and a newest-first page describes today.
-	Until    string `json:"until,omitempty"`
-	Match    string `json:"match,omitempty"`
-	Severity string `json:"severity,omitempty"`
-	State    string `json:"state,omitempty"`
-	Host     string `json:"host_filter,omitempty"`
-	Owner    string `json:"owner_filter,omitempty"`
+	Until string `json:"until,omitempty"`
+	// SinceLocal, UntilLocal and LocalZone give the window in the
+	// deployment's zone, computed in code; see LocalizeTimes.
+	SinceLocal string `json:"since_local,omitempty"`
+	UntilLocal string `json:"until_local,omitempty"`
+	LocalZone  string `json:"local_zone,omitempty"`
+	Match      string `json:"match,omitempty"`
+	Severity   string `json:"severity,omitempty"`
+	State      string `json:"state,omitempty"`
+	Host       string `json:"host_filter,omitempty"`
+	Owner      string `json:"owner_filter,omitempty"`
 	// Queues and Status are set only when the request narrowed them; absent
 	// means every allowlisted queue and new/open/stalled.
 	Queues []string `json:"queue_filter,omitempty"`

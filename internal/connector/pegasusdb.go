@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	// The epoch notes need the server's zone whether or not the host running
 	// Cassandra has zoneinfo installed.
@@ -50,6 +51,9 @@ type PegasusConnector struct {
 	maxBytes         int
 	statementTimeout time.Duration
 	endpoint         string
+	// zoneNote is the server's zone, read once; see serverZoneNote.
+	zoneOnce sync.Once
+	zoneNote string
 }
 
 // NewPegasusConnector validates configuration and opens a pooled connection.
@@ -193,12 +197,18 @@ func (c *PegasusConnector) Execute(ctx context.Context, step broker.RouteStep) (
 		summary["row_limit"] = rowLimit
 	}
 
+	notes := accountingNotes(step.Query, requestedAt)
+	if localTimeFunction.MatchString(step.Query) {
+		if note := c.serverZoneNote(ctx, conn); note != "" {
+			notes = append(notes, note)
+		}
+	}
 	return Evidence{
 		Source:         string(broker.SourcePegasusDB),
 		Action:         step.Action,
 		Endpoint:       c.endpoint,
 		Query:          step.Query,
-		Notes:          accountingNotes(step.Query, requestedAt),
+		Notes:          notes,
 		RequestedAt:    requestedAt,
 		DurationMS:     time.Since(requestedAt).Milliseconds(),
 		ItemCount:      len(items),
@@ -226,6 +236,37 @@ const workloadReporting = "before answering, also give: for a window that spans 
 	"window were excluded or unclassified, naming the unclassified partitions. Run one more query for these if " +
 	"this result does not already show them"
 
+// finalAttemptNote goes with any runTBL2 result that reads State. On
+// 2026-10-23 a count of 56 failed jobs in an incident window was reported
+// without a caveat; the scheduler's own accounting showed 111, because the
+// requeued jobs' failed attempts are not rows here.
+const finalAttemptNote = "runTBL2 keeps one row per JobID, holding that job's final attempt only. A job that " +
+	"failed (for example NODE_FAIL) and was requeued appears once, with the state of its last attempt, so a " +
+	"count of failures, lost work or incident impact from it counts final outcomes and misses earlier failed " +
+	"attempts. Say so when reporting such a count"
+
+// localTimeFunction matches the functions that read or write the server's
+// local time, as opposed to the zone-free Unix-second columns.
+var localTimeFunction = regexp.MustCompile(`(?i)\b(from_unixtime|unix_timestamp\s*\(\s*'|now\s*\(|curdate|current_date|current_timestamp|sysdate)`)
+
+// serverZoneNote names the zone this database renders local times in. It is
+// read from the server once per connector, not assumed: on 2026-10-23 its
+// times were EDT while Zabbix and Wazuh evidence beside them was UTC, and
+// nothing said so. A failed read leaves no note rather than failing the query.
+func (c *PegasusConnector) serverZoneNote(ctx context.Context, conn *sql.Conn) string {
+	c.zoneOnce.Do(func() {
+		var system, session string
+		if err := conn.QueryRowContext(ctx, "SELECT @@system_time_zone, @@session.time_zone").Scan(&system, &session); err != nil {
+			return
+		}
+		c.zoneNote = fmt.Sprintf("this database renders times in its server zone, %s (time_zone=%s): FROM_UNIXTIME, "+
+			"NOW() and UNIX_TIMESTAMP('...') read and write local time there, while SubmitTime, StartTime and EndTime "+
+			"are Unix seconds and have no zone. Times this query formats are in that zone; Zabbix and Wazuh "+
+			"evidence is UTC unless it carries a _local twin", system, session)
+	})
+	return c.zoneNote
+}
+
 // memoryNote goes with any result that touches a memory column. Before 22
 // January 2026 both columns are null, so a total over a window that starts
 // earlier silently covers part of it.
@@ -250,6 +291,9 @@ func accountingNotes(query string, requestedAt time.Time) []string {
 	if strings.Contains(lower, "runtbl2") {
 		notes = append(notes, "as of "+requestedAt.Format(time.RFC3339)+": totals for a past window can still "+
 			"grow until every job submitted in it has finished and been ingested, so quote this time with the figures")
+		if strings.Contains(lower, "state") {
+			notes = append(notes, finalAttemptNote)
+		}
 	}
 	notes = append(notes, fiscalYearNotes(lower)...)
 	notes = append(notes, epochNotes(query)...)

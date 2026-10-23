@@ -118,6 +118,10 @@ So: a question about what is *wrong* takes no bound. A bound belongs only on a q
 
 The evidence reports the bound that was applied as `since`. If you asked for one and the evidence does not carry it, the result is unfiltered: say so rather than describing it as a time-scoped answer.
 
+<!-- rule:time-zones -->
+**Time zones.** Zabbix, Wazuh and Request Tracker evidence gives times in UTC (RFC 3339, ending `Z`). When this deployment sets a local zone, each such time also has a `_local` twin, and the evidence carries `since_local` and `until_local`. Report times in the zone the question used, copying the `_local` values rather than converting them yourself, and never label a UTC time with a local zone name. When the question gives local times, pass `since` and `until` with their offset, such as `2026-10-21T11:00:00-04:00`. Decide whether an event falls inside the window by comparing times in one zone. The accounting database renders `FROM_UNIXTIME` and `UNIX_TIMESTAMP('...')` in its server zone, which its evidence names.
+<!-- /rule -->
+
 ## Narrowing monitoring evidence
 
 `monitoring.problems` and `monitoring.history` take a host and four more selectors. Nothing else does; the broker refuses them elsewhere rather than ignoring them.
@@ -269,6 +273,11 @@ Rules for `database.query`:
   then bound the real query with that day. `CURDATE()` is the wrong anchor
   here: it is ahead of the data by about a day, so it selects a partial day
   and reports a fraction of it as a total.
+
+  It is loaded nightly from the scheduler's own accounting, one row per
+  JobID holding that job's final attempt. Earlier attempts of a requeued job
+  are not rows here, so a count of failures by `State` counts final outcomes,
+  not every failed attempt; say so when reporting one.
 <!-- /rule -->
 
 <!-- rule:runtbl2-columns -->
@@ -377,6 +386,8 @@ WHERE table_schema='pegasusdb'
 - Unless the user says otherwise, "on a given day" means submit date.
 <!-- rule:relative-window -->
 - A relative window like "last 7 days" is ambiguous. Use `NOW()` for a rolling window and say that you did so.
+<!-- rule:overlap-window -->
+- "Ran during", "ran on ... between", "was running at" or "active in" a window means the job overlapped it: `StartTime > 0 AND StartTime < end AND EndTime > start`. Only "ran entirely within" or "started and finished between" means `StartTime >= start AND EndTime <= end`, which drops every job that began before the window or ended after it. Say which you used.
 
 ### Units
 
@@ -478,6 +489,8 @@ After re-checking, report only the corrected result. Do not narrate the mistake.
 - One form for every percentile is the point. A query reporting P50 with `MEDIAN` and P95 with `PERCENTILE_CONT` invites a reader to wonder whether the two were computed the same way, and `WITHIN GROUP (ORDER BY ...)` states the ordering expression outright, which matters when it is derived like `StartTime - SubmitTime` rather than a plain column.
 - `MEDIAN(expr) OVER (...)` also exists and MariaDB defines it as exactly `PERCENTILE_CONT(0.5)` with the `ORDER BY` being the expression. It is shorthand, not a different calculation. Read it correctly if you meet it; do not reach for it.
 - `PERCENTILE_CONT` interpolates, so the value it returns need not be any observed value.
+<!-- rule:offer-aggregate -->
+- When a list is too large to return, say how many rows matched and give the aggregate in the same answer, from one more query: counts by state, partition or day. Declining without it leaves the reader nothing.
 <!-- rule:sql-error-is-not-zero -->
 - **A failed query is a failed calculation, never a zero.** If the SQL errors, report that the figure could not be computed and why; do not answer "the median is 0" or "no jobs waited". An error means the question is unanswered, not answered with nothing.
 - A computed `0.00` hours, on the other hand, can be real: rounded to two decimals it means anything under about eighteen seconds. Before calling such a result suspicious, look at it in seconds.

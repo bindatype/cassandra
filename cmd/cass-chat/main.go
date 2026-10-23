@@ -44,6 +44,9 @@ const (
 	// Set by cass-mcp for the person and agent a question is answered for.
 	callerEnv = "CASS_CALLER"
 	clientEnv = "CASS_CLIENT"
+	// localZoneEnv names the zone evidence times are also given in, as an
+	// IANA name such as America/New_York. Unset leaves them in UTC only.
+	localZoneEnv = "CASS_LOCAL_TZ"
 	// rtQueuesEnv names the RT queues this deployment may search,
 	// comma-separated. There is no safe default.
 	rtQueuesEnv = "CASS_RT_QUEUES"
@@ -130,6 +133,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		session = session.WithAudit(auditor, *model)
 	}
 	session = session.WithCaller(env.Get(callerEnv), env.Get(clientEnv))
+	if name := env.Get(localZoneEnv); name != "" {
+		location, err := time.LoadLocation(name)
+		if err != nil {
+			fmt.Fprintf(stderr, "cass-chat: %s: %v\n", localZoneEnv, err)
+			return 2
+		}
+		session = session.WithLocalZone(location)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()

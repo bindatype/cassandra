@@ -248,6 +248,15 @@ type Session struct {
 	// partial is set when the answer was written at the turn limit, from
 	// whatever evidence had been collected by then.
 	partial bool
+	// localZone, when set, adds local times beside the UTC times in evidence.
+	localZone *time.Location
+}
+
+// WithLocalZone sets the zone evidence times are also given in, so an answer
+// copies a local time rather than converting one. Nil leaves evidence in UTC.
+func (s *Session) WithLocalZone(location *time.Location) *Session {
+	s.localZone = location
+	return s
 }
 
 // WithAudit attaches an audit destination. Without one the session works but
@@ -790,6 +799,9 @@ func (s *Session) runOneCall(ctx context.Context, call ToolCall) (connector.Resu
 	if err != nil {
 		s.record("execution_failed", err.Error(), false)
 		return connector.Result{}, &callFailure{err: err, recoverable: true}
+	}
+	for i := range result.Evidence {
+		connector.LocalizeTimes(&result.Evidence[i], s.localZone)
 	}
 	return result, nil
 }
