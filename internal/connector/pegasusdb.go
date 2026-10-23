@@ -240,10 +240,10 @@ const workloadReporting = "before answering, also give: for a window that spans 
 // 2026-10-23 a count of 56 failed jobs in an incident window was reported
 // without a caveat; the scheduler's own accounting showed 111, because the
 // requeued jobs' failed attempts are not rows here.
-const finalAttemptNote = "runTBL2 keeps one row per JobID, holding that job's final attempt only. A job " +
-	"that was requeued, for example after a NODE_FAIL, appears once with the state of its last attempt, so a " +
-	"count by State reflects final outcomes, not earlier attempts. When the count is about failures, lost work " +
-	"or incident impact, say so"
+const finalAttemptNote = "runTBL2 keeps one row per JobID, holding that job's final attempt only. A job that " +
+	"failed (for example NODE_FAIL) and was requeued appears once, with the state of its last attempt, so a " +
+	"count of failures, lost work or incident impact from it counts final outcomes and misses earlier failed " +
+	"attempts. Say so when reporting such a count"
 
 // localTimeFunction matches the functions that read or write the server's
 // local time, as opposed to the zone-free Unix-second columns.
