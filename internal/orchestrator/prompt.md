@@ -325,7 +325,7 @@ Columns marked *text* hold numbers stored as strings. `MAX`, `ORDER BY`, `<` and
 <!-- rule:table-preference -->
 Use the first of these that can answer the question:
 
-1. `runTBL2_jobs`: every column of `runTBL2`, plus `workload`; `wait_s` (StartTime - SubmitTime, NULL for a job that never started) and `run_s`; `mem_req_gb` and `mem_alloc_gb`; `gpus_req` and `gpus_alloc`; `nodes_req`; `timelimit_min`; `submit_day` and `submit_month` in the server's time zone; `state_group`, with `CANCELLED by <uid>` folded into `CANCELLED`; and `schoolName` and `deptName` from `groupTBL`, NULL for a group `groupTBL` does not list rather than dropping the job. Use it for wait and run times, schools, memory, GPU counts, and per-day or per-month counts. It is current within hours.
+1. `runTBL2_jobs`: every column of `runTBL2`, plus `workload`; `wait_s` (StartTime - SubmitTime, NULL for a job that never started) and `run_s`; `mem_req_gb` and `mem_alloc_gb`; `gpus_req` and `gpus_alloc`; `nodes_req`; `timelimit_min`; `submit_day` (a DATE, '2026-09-15') and `submit_month` (text, '2026-09') in the server's time zone; `state_group`, with `CANCELLED by <uid>` folded into `CANCELLED`; and `schoolName` and `deptName` from `groupTBL`, NULL for a group `groupTBL` does not list rather than dropping the job. Use it for wait and run times, schools, memory, GPU counts, and per-day or per-month counts. It is current within hours.
 2. `runTBL2_workload`, for GPU and CPU job counts; see the workload rule below.
 3. `runTBL2`, for anything else about jobs.
 4. A fiscal-year table, `FY2019` to `FY2026`, only when the question names that fiscal year. Each holds only jobs submitted up to 30 June of its year and gains no rows: `FY2026` ends with jobs submitted on 2026-06-30, and there is no fiscal-year table after it. Precomputed `WaitTime` and `RunTime` are not a reason to choose one: `runTBL2_jobs` has `wait_s` and `run_s` for every period.
@@ -381,6 +381,8 @@ WHERE table_schema='pegasusdb'
 - Do not compare Unix-integer columns to datetime expressions directly. That can return zero rows without error.
 - Bucket by day with `DATE(FROM_UNIXTIME(SubmitTime))`.
 - Bucket by hour with `DATE_FORMAT(FROM_UNIXTIME(SubmitTime), '%Y-%m-%d %H')`.
+<!-- rule:filter-on-the-column -->
+- Use those expressions to group and to label, never to filter. Filter a day or a window with a range on the integer column itself, which uses the index: `SubmitTime >= UNIX_TIMESTAMP('2026-10-22') AND SubmitTime < UNIX_TIMESTAMP('2026-10-23')`. `WHERE DATE(FROM_UNIXTIME(SubmitTime)) = '2026-10-22'` selects the same rows but reads all 6.4 million of them; the range reads only that day's. The same goes for `runTBL2_jobs`' `submit_day` and `submit_month`: they are computed per row, so group by them but filter on `SubmitTime`.
 <!-- rule:day-means-submitted -->
 - Unless the user says otherwise, "on a given day" means submit date.
 <!-- rule:relative-window -->

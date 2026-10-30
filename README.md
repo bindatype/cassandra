@@ -493,6 +493,44 @@ Wazuh vulnerability data lives in the Indexer, not the API. `/vulnerability`
 returns 404 on 4.14.5. Reaching it needs an SSH tunnel and a separate
 credential; see the Wazuh Interaction Guide.
 
+### What an answer tells you
+
+An answer is prose written over evidence, and the evidence says what it does
+and does not cover. Clients that receive it as JSON (`cass-chat -json`, or the
+MCP result) get the same evidence the model saw.
+
+- **Figures come from the source.** Counts are computed in code and carried in
+  `summary`; `returned` and `total_matching` are kept apart, so a truncated page
+  is never read as the population.
+- **A search term that matched nothing says so.** A monitoring `match` that
+  finds no problem name reports that no name contained the term, and lists the
+  names that do exist under the same filters. An inventory match tries `-` and
+  `_` swapped once, then lists process names that share the term's first
+  letters. Neither reads as "nothing is wrong" or "not running".
+- **A host given without its domain is resolved** to the one inventory agent
+  whose name begins with it and a dot, and the evidence names the agent it
+  used. Several candidates are refused with the list.
+- **Times.** Evidence times are UTC. With `CASS_LOCAL_TZ` set, each one also
+  has a `_local` twin, and the window has `since_local` and `until_local`,
+  computed in code so an answer copies a local time instead of converting one.
+  Accounting-database evidence names the zone its server renders
+  `FROM_UNIXTIME` and `UNIX_TIMESTAMP('...')` in, and notes any time literal
+  written with an offset, which that server ignores.
+- **Accounting caveats travel with the rows.** A result that counts job
+  states notes that the table holds each job's final attempt, so earlier
+  failed attempts of a requeued job are not counted.
+- **Some query shapes are refused before they run,** with the correction:
+  partition-name patterns used as a GPU or CPU class, arithmetic on memory
+  columns that carry a unit suffix, and computed date columns compared with
+  a literal in the wrong form. Filtering on a function of a time column is
+  discouraged in favour of a range on the column, which can use its index.
+- **At most five evidence calls per question.** If the calls run out with
+  evidence in hand, one more turn is made with no tools offered, and the
+  answer is written from what was collected. It is marked `partial` in the
+  audit record, in `cass-chat -json`, and in the MCP result, whose text ends
+  "partial answer". With nothing collected, the question fails and says the
+  calls were used up.
+
 ### Runtime environment
 
 Credentials live in a file that is sourced explicitly, never in the
@@ -513,6 +551,7 @@ export WAZUH_API_PASSWORD=...
 export CASS_RT_ENDPOINT=https://rt.example.edu
 export RT_API_TOKEN=...
 export CASS_RT_QUEUES=Ops,Helpdesk
+export CASS_LOCAL_TZ=Europe/Berlin
 ENVEOF
 chmod 600 ~/.config/cass/env
 ```
@@ -523,6 +562,10 @@ safe default queue set, so a plan that needs RT and finds no queues
 configured fails closed rather than searching every queue in the instance.
 Prefer a dedicated read-only RT API token scoped to those queues, the same
 way `rts_wazuh_api_ro` is scoped for Wazuh.
+
+`CASS_LOCAL_TZ` is optional: an IANA zone name in which evidence times are
+also given, beside UTC. Unset leaves evidence in UTC only; an invalid name
+stops `cass-chat` at startup rather than silently ignoring it.
 
 Note `export`. A variable merely set in `~/.bashrc` is visible to an
 interactive shell but not inherited by child processes, which has cost

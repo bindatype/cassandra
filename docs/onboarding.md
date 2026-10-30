@@ -107,7 +107,7 @@ export CASS_MODEL=default-agent
 
 # The zone evidence times are also given in, beside UTC, so answers copy a
 # local time rather than converting one. An IANA name; unset leaves UTC only.
-export CASS_LOCAL_TZ=America/New_York
+export CASS_LOCAL_TZ=Europe/Berlin
 
 # Zabbix: monitoring problems and the event log.
 export CASS_ZABBIX_ENDPOINT=https://zabbix.example.edu/api_jsonrpc.php
