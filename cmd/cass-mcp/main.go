@@ -147,6 +147,7 @@ func chatRunner(chat, policy string, wazuhInsecure bool, timeout time.Duration) 
 			Error     string          `json:"error"`
 			RequestID string          `json:"request_id"`
 			AsOf      string          `json:"as_of"`
+			Partial   bool            `json:"partial"`
 			Evidence  json.RawMessage `json:"evidence"`
 		}
 		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
@@ -159,7 +160,7 @@ func chatRunner(chat, policy string, wazuhInsecure bool, timeout time.Duration) 
 		if out.Error != "" {
 			return Answer{}, errors.New(out.Error)
 		}
-		return Answer{Text: out.Answer, RequestID: out.RequestID, AsOf: out.AsOf, Evidence: out.Evidence}, nil
+		return Answer{Text: out.Answer, RequestID: out.RequestID, AsOf: out.AsOf, Partial: out.Partial, Evidence: out.Evidence}, nil
 	}
 }
 

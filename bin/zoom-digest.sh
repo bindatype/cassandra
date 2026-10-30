@@ -42,7 +42,7 @@ case ${1:-} in
 	;;
 esac
 # An optional substring selects one section, so testing a single question does
-# not mean running all three.
+# not mean running them all.
 ONLY=${1:-}
 
 # Fail before asking anything. Without this the first missing variable surfaces
@@ -134,6 +134,16 @@ digest() {
 	fi
 }
 
+# Wazuh agents and the longest-open tickets post on Mondays only; the rest is
+# daily (Glen, 2026-10-18). Naming a section (-n Wazuh) runs it on any day, so
+# a weekly section can still be tested by hand. Something posts every day, so
+# the watchdog's receipt is unaffected.
+weekly() {
+	if [ -n "$ONLY" ] || [ "$(date +%u)" = 1 ]; then
+		digest "$@"
+	fi
+}
+
 POSTED=0
 UNSENT=0
 
@@ -141,7 +151,7 @@ digest "Zabbix overnight" "what problems started since yesterday, and how many a
 # Critical groups are set by CASS_WAZUH_CRITICAL_GROUPS and marked in the
 # evidence before the model sees it, so this asks for a report rather than a
 # calculation.
-digest "Wazuh agents" "how many agents are disconnected right now, and are any of them in a critical group? Name the critical ones as a short bulleted list."
+weekly "Wazuh agents" "how many agents are disconnected right now, and are any of them in a critical group? Name the critical ones as a short bulleted list."
 # Not "the last 24 hours": runTBL2 lags ingestion by about a day, so that
 # window holds only the leading edge and reads as an idle cluster every
 # morning. A complete past day is the honest question.
@@ -188,7 +198,7 @@ digest "Scheduler: wait times" "for the most recent complete day in runTBL2, for
 # "Active", not "open": the word sets status: active, which searches RT's own
 # __Active__ statuses. "Open" searches new, open and stalled, which misses
 # active tickets in queues whose lifecycle uses other statuses.
-digest "Longest-open tickets" "which tickets are still active and were created more than 30 days ago? State the total number matching, then list only the 5 oldest, each as a bulleted line with its subject, owner, and how many days it has been open."
+weekly "Longest-open tickets" "which tickets are still active and were created more than 30 days ago? State the total number matching, then list only the 5 oldest, each as a bulleted line with its subject, owner, and how many days it has been open."
 
 
 # A dry run deliberately writes no receipt. If it did, testing by hand would

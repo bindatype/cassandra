@@ -199,6 +199,20 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 	if err != nil {
 		return Evidence{}, err
 	}
+	var notes []string
+	if step.Action == "agents.status" && len(payload.Data.AffectedItems) == 0 {
+		name, err := c.expandShortName(ctx, step.Host)
+		if err != nil {
+			return Evidence{}, err
+		}
+		if name != "" {
+			query.Set("name", name)
+			if payload, err = c.get(ctx, "/agents", query); err != nil {
+				return Evidence{}, err
+			}
+			notes = append(notes, resolvedNameNote(step.Host, name))
+		}
+	}
 
 	items := normalizeAgents(payload.Data.AffectedItems, c.criticalGroups)
 	if step.Action == "agents.list" && len(items) > fleetItemCap {
@@ -215,6 +229,7 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 		Source:         string(broker.SourceWazuhAPI),
 		Action:         step.Action,
 		Warnings:       warnings,
+		Notes:          notes,
 		Endpoint:       redactEndpoint(c.endpoint),
 		Since:          step.Since,
 		RequestedAt:    requestedAt,
@@ -225,6 +240,55 @@ func (c *WazuhConnector) Execute(ctx context.Context, step broker.RouteStep) (Ev
 		Summary:        summarizeAgents(payload.Data.AffectedItems, c.criticalGroups),
 		Items:          items,
 	}, nil
+}
+
+// maxNameCandidates bounds the agent names an ambiguous short name lists.
+const maxNameCandidates = 10
+
+// expandShortName resolves a host given without its domain ("db01") to the
+// one agent whose name begins with it and a dot ("db01.example.edu"). Agent
+// names are exact in Wazuh, and on 2026-10-23 short names were refused as
+// unknown agents. It returns "" when nothing begins with the name, and an
+// unknown_agent error naming the candidates when more than one does.
+func (c *WazuhConnector) expandShortName(ctx context.Context, host string) (string, error) {
+	if host == "" || strings.Contains(host, ".") {
+		return "", nil
+	}
+	payload, err := c.get(ctx, "/agents", url.Values{
+		"select": {"name"},
+		"q":      {"name~" + host + "."},
+		"limit":  {"100"},
+	})
+	if err != nil {
+		return "", err
+	}
+	prefix := strings.ToLower(host) + "."
+	var candidates []string
+	for _, agent := range payload.Data.AffectedItems {
+		if strings.HasPrefix(strings.ToLower(agent.Name), prefix) {
+			candidates = append(candidates, agent.Name)
+		}
+	}
+	switch {
+	case len(candidates) == 1:
+		return candidates[0], nil
+	case len(candidates) > 1:
+		sort.Strings(candidates)
+		if len(candidates) > maxNameCandidates {
+			candidates = candidates[:maxNameCandidates]
+		}
+		return "", newConnectorError("unknown_agent", fmt.Sprintf(
+			"Wazuh has no agent named %q, and several begin with it: %s. Ask again with the full name",
+			host, strings.Join(candidates, ", ")))
+	}
+	return "", nil
+}
+
+// resolvedNameNote says that a short name was expanded, so the answer names
+// the agent Wazuh actually reported on.
+func resolvedNameNote(asked, resolved string) string {
+	return fmt.Sprintf("host %q was resolved to the Wazuh agent %q, the only agent whose name begins with it; "+
+		"refer to it by that name", asked, resolved)
 }
 
 // executeGroups answers a group-census question from Wazuh's own per-group
